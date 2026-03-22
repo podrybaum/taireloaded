@@ -1,0 +1,67 @@
+✓ block: filterline
+       stmts NEWLINE responses block_end
+
+✓ filterline: filters stmts NEWLINE
+
+✓ responses: responseline responseline+
+
+✓ responseline: LBRACKET list_strings RBRACKET stmts NEWLINE
+
+✓ list_strings: STRING (COMMA STRING)?
+
+✓ stmts: stmt ( assignment | expr | call | conditional_goto )?
+
+✓ stmt: assignment
+      expr
+      call
+      headline
+      conditional_goto
+      follow_up
+
+follow_up: FOLLOW_UP l_delimiter block r_delimiter
+
+✓ headline: LPAREN STRING RPAREN
+
+✓ block_end: BLOCK_END stmts NEWLINE
+
+✓ filters: conditionals ( AND conditional | OR conditional | conditional)?
+
+✓ conditional_goto: IF conditionals THEN l_delimiter STRING r_delimiter
+
+✓ conditional: NOT? COMMAND_FILTER
+             expr ( IS_EQUAL_TO | LESS | GREATER | LE | GE | NEQ ) expr
+
+✓ call: FUNCTION_CALL params?
+
+✓ keyword_call: KEYWORD params?
+
+✓ params: l_delimiter expr ( COMMA expr )* r_delimiter
+
+✓ expr: binary_string 
+      binary_int
+      assignment
+
+✓ assignment: ref ( EQUALS | INC_BY | DEC_BY ) l_delimiter expr r_delimiter ( math_op? l_delimiter expr r_delimiter )
+            ref ( INC | DEC )
+      
+✓ ref: ( NOT | MINUS )? #VAR l_delimiter binary_string r_delimiter
+
+✓ binary_string: string_expr PLUS? ( binary_int | string_expr )
+               binary_int (PLUS | TIMES)? string_expr
+               string_expr TIMES binary_int
+               string_expr MINUS string_expr
+
+✓ binary_int: int_value ( math_op int_value )?
+
+✓ int_value : MINUS? INTEGER | ref
+
+✓ string_value: STRING
+             VOCAB
+             keyword_call
+             ref
+
+✓ math_op: PLUS | MINUS | TIMES | DIVIDEDBY | EXPONENT | MODULO 
+
+✓ l_delimiter : LBRACKET | LPAREN
+
+✓ r_delimiter : RBRACKET | RPAREN
