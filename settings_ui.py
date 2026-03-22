@@ -1,20 +1,14 @@
 from kivymd.app import MDApp
-from kivy.clock import Clock
-from kivy.graphics import Color, Line, Rectangle
 from kivy.properties import BooleanProperty
 from kivy.properties import NumericProperty
 from kivy.core.window import Window
-from kivy.uix.gridlayout import GridLayout
 from kivy.uix.floatlayout import FloatLayout
-from kivy.uix.label import Label
-from kivymd.uix.card import MDCard
 from kivymd.uix.label import MDLabel
 from kivymd.uix.textfield import MDTextField
 from kivymd.uix.divider import MDDivider
 from kivymd.uix.screen import MDScreen
 from kivymd.uix.tab import MDTabsItemText, MDTabsSecondary, MDTabsItemSecondary
 from kivy.uix.boxlayout import BoxLayout
-from kivymd.uix.boxlayout import MDBoxLayout
 from kivy.modules import inspector
 from draggable_title_bar import DraggableTitleBar
 from kivy.metrics import dp
@@ -23,8 +17,6 @@ from main import runtime
 from kivymd.theming import ThemableBehavior
 from kivymd.uix.behaviors import BackgroundColorBehavior
 from kivymd.uix.behaviors.elevation import CommonElevationBehavior
-from kivymd.uix.behaviors.declarative_behavior import DeclarativeBehavior
-from kivymd.uix import MDAdaptiveWidget
 
 
 SETTINGS_CONTROL_LABEL_WIDTH = dp(250)

@@ -142,6 +142,7 @@ class Sub:
         self._cumulative_edge_time = 0
         self.last_orgasm_date = None
         self.last_ruin_date = None
+        self.name = ""
 
     def from_dict(self, dict):
         self.min_edge_hold_time = dict["min_edge_hold_time"]
@@ -165,6 +166,7 @@ class Sub:
         self._cumulative_edge_time = dict["_cumulative_edge_time"]
         self.last_orgasm_date = utils.date_from_string(dict["last_orgasm_date"])
         self.last_ruin_date = utils.date_from_string(dict["last_ruin_date"])
+        self.name = dict["name"]
 
 
 # stubbing for now
@@ -249,6 +251,7 @@ settings_dict = {
 }
 
 sub_dict = {
+    "name": "Brandon",
     "min_edge_hold_time": 5,
     "max_edge_hold_time": 10,
     "min_long_hold_time": 20,
@@ -382,3 +385,6 @@ class Settings:
 
     def set(self, name, value):
         setattr(self, name, value)
+
+    def get(self, name):
+        return getattr(self, name, None)
