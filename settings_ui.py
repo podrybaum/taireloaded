@@ -88,13 +88,13 @@ class NumericTextFieldEntry(BoxLayout):
         self.text_field.pos_hint = {"center_y": 0.5}
         self.label.font_size = 18
         self.text_field.font_size = 14
-        self.text_field.height = dp(30)
+        self.text_field.height = dp(25)
         self.add_widget(self.label)
         self.add_widget(self.text_field)
         self.label.width = SETTINGS_CONTROL_LABEL_WIDTH
         self.label.valign = "bottom"
         self.label.height = self.text_field.height
-        self.text_field.width = dp(50)
+        self.text_field.width = dp(44)
         self.text_field.bind(text=self.setter("value"))
 
     def on_value(self, instance, value):
@@ -107,13 +107,10 @@ class SettingsCard(FloatLayout, CommonElevationBehavior, ThemableBehavior, Backg
         self.size_hint = (None, None)
         self.width = SETTINGS_CONTROL_LABEL_WIDTH + dp(77)
         self.spacing = dp(5)
-        self.theme_bg_color = "Custom"
-        self.md_bg_color = (0.08, 0.08, 0.1, 1)
         self.theme_line_color = "Custom"
         self.line_color = "#545454"
         self.radius = dp(8)
-        # self.padding = [dp(5), dp(-5), dp(5), dp(-1)]
-        self.content = BoxLayout(orientation="vertical", size_hint=(1, 1))
+        self.content = BoxLayout(orientation="vertical", size_hint=(1, 1), pos_hint={"center_y": 0.6, "center_x": 0.5})
         self.label = MDLabel(text=f" {label}")
         self.label.theme_bg_color = "Custom"
         self.label.md_bg_color = (0, 0, 0, 1)
@@ -124,21 +121,14 @@ class SettingsCard(FloatLayout, CommonElevationBehavior, ThemableBehavior, Backg
         self.label.width = dp(len(self.label.text) * dp(5))
         self.label.font_size = dp(12)
         self.label.valign = "center"
-        # self.label.pos_hint = {"x": 0.05}
         poss, posy = self.to_parent(self.x, self.top)
         self.label.pos_hint = {"center_y": 1, "x": 0.05}
         self.add_widget(self.label)
         self.add_widget(self.content)
 
-    # self.on_leave()
-
-    # def on_enter(self, *args):
-    #    return True
-
     def add_widget(self, *args, **kwargs):
-        if len(self.children) == 2:
+        if len(self.children) >= 2:
             self.content.add_widget(*args, **kwargs)
-            self.height = self.content.height
         else:
             super().add_widget(*args)
 
@@ -160,7 +150,7 @@ class Settings_UI(MDScreen):
 
         self.general_settings = BoxLayout(orientation="vertical", size_hint=(1, None), height=dp(600))
         self.sub_settings = BoxLayout(
-            orientation="vertical", size_hint=(1, None), height=dp(600), spacing=dp(5), padding=dp(5)
+            orientation="vertical", size_hint=(1, None), height=dp(600), spacing=dp(10), padding=dp(5)
         )
         self.domme_settings = BoxLayout(orientation="vertical", size_hint=(1, None))
         self.contacts_settings = BoxLayout(orientation="vertical", size_hint=(1, None))
@@ -197,17 +187,24 @@ class Settings_UI(MDScreen):
         )
         stats_box.add_widget(sub_cock_size)
         self.sub_settings.add_widget(stats_box)
+        stats_box.height = dp(80)
 
+        chastity_box = SettingsCard(label="Chastity")
         sub_has_chastity = SettingsCheckboxControl(name="Sub.has_chastity", text="Owns a chastity device")
-        self.sub_settings.add_widget(sub_has_chastity)
+        chastity_box.add_widget(sub_has_chastity)
         sub_chastity_piercing = SettingsCheckboxControl(
             name="Sub.chastity_piercing", text="Chastity device requires piercing", disabled=True
         )
-        self.sub_settings.add_widget(sub_chastity_piercing)
+        chastity_box.add_widget(sub_chastity_piercing)
         sub_chastity_spikes = SettingsCheckboxControl(
             name="Sub.chastity_spikes", text="Chastity device has spikes", disabled=True
         )
-        self.sub_settings.add_widget(sub_chastity_spikes)
+        chastity_box.add_widget(sub_chastity_spikes)
+        self.sub_settings.add_widget(chastity_box)
+        chastity_box.height = dp(135)
+
+        col_1_sizer = BoxLayout(size_hint=(1, None))
+        self.sub_settings.add_widget(col_1_sizer)
 
         # Finish Layout Init
         self.add_widget(self.layout)
