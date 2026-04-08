@@ -1,7 +1,9 @@
-from datetime import datetime
+import os
+import json
 import utils
 from bus import Bus
-from message_classes import UserMessage
+
+APPLICATION_ROOT = os.path.dirname(os.path.abspath(__file__))
 
 
 ALLOWS_ORGASMS = {1: "Always Allows", 2: "Often Allows", 3: "Sometimes Allows", 4: "Rarely Allows", 5: "Never Allows"}
@@ -22,9 +24,6 @@ class DommeObj:
         self.apathy_level = 0
         self.avg_cock_size_max = 0
         self.avg_cock_size_min = 0
-        self.birthday_day = 0
-        self.birthday_month = 0
-        self.birthday_year = 0
         self.cfnm = False
         self.crazy = False
         self.cup_size = ""
@@ -93,7 +92,50 @@ class DommeObj:
         self.femdom_video = dict["femdom_video"]
         self.femsub_video = dict["femsub_video"]
         self.ch_video = dict["ch_video"]
-        self.general_video = dict["general_video"]
+        self.general_video = dict.get("general_video", "")
+
+    def to_dict(self):
+        return {
+            "_avatar": self._avatar,
+            "_image_folder": self._image_folder,
+            "name": self.name,
+            "honorific": self.honorific,
+            "apathy_level": self.apathy_level,
+            "level": self.level,
+            "cup_size": self.cup_size,
+            "eyes": self.eyes,
+            "hair_color": self.hair_color,
+            "hair_length": self.hair_length,
+            "birthday_day": self.birthday_day,
+            "birthday_month": self.birthday_month,
+            "birthday_year": self.birthday_year,
+            "avg_cock_size_min": self.avg_cock_size_min,
+            "avg_cock_size_max": self.avg_cock_size_max,
+            "allows_orgasms": self.allows_orgasms,
+            "ruins_orgasms": self.ruins_orgasms,
+            "_good_mood_pet_names": self._good_mood_pet_names,
+            "_neutral_mood_pet_names": self._neutral_mood_pet_names,
+            "_bad_mood_pet_names": self._bad_mood_pet_names,
+            "crazy": self.crazy,
+            "vulgar": self.vulgar,
+            "degrading": self.degrading,
+            "cfnm": self.cfnm,
+            "supremacist": self.supremacist,
+            "sadistic": self.sadistic,
+            "mood_index_min": self.mood_index_min,
+            "mood_index_max": self.mood_index_max,
+            "age": self.age,
+            "short_name": self.short_name,
+            "joi_video": self.joi_video,
+            "hardcore_video": self.hardcore_video,
+            "softcore_video": self.softcore_video,
+            "lesbian_video": self.lesbian_video,
+            "blowjob_video": self.blowjob_video,
+            "femdom_video": self.femdom_video,
+            "femsub_video": self.femsub_video,
+            "ch_video": self.ch_video,
+            "general_video": self.general_video,
+        }
 
     def __str__(self):
         return self.name
@@ -112,8 +154,17 @@ class Contact:
         self.name = dict["name"]
         self.honorific = dict["honorific"]
         self._number = dict["_number"]
-        self._avatar = dict["_avatar"]
-        self._image_folder = dict["_image_folder"]
+        self._avatar = dict.get("_avatar")
+        self._image_folder = dict.get("_image_folder")
+
+    def to_dict(self):
+        return {
+            "name": self.name,
+            "honorific": self.honorific,
+            "_number": self._number,
+            "_avatar": self._avatar,
+            "_image_folder": self._image_folder,
+        }
 
     def __str__(self):
         return self.name
@@ -143,6 +194,7 @@ class Sub:
         self.last_orgasm_date = None
         self.last_ruin_date = None
         self.name = ""
+        self.long_edge_interrupts = True
 
     def from_dict(self, dict):
         self.min_edge_hold_time = dict["min_edge_hold_time"]
@@ -164,9 +216,39 @@ class Sub:
         self.long_edge_threshold = dict["long_edge_threshold"]
         self._edges_all_time = dict["_edges_all_time"]
         self._cumulative_edge_time = dict["_cumulative_edge_time"]
-        self.last_orgasm_date = utils.date_from_string(dict["last_orgasm_date"])
-        self.last_ruin_date = utils.date_from_string(dict["last_ruin_date"])
-        self.name = dict["name"]
+        self.last_orgasm_date = (
+            utils.date_from_string(dict["last_orgasm_date"]) if dict.get("last_orgasm_date") else None
+        )
+        self.last_ruin_date = utils.date_from_string(dict["last_ruin_date"]) if dict.get("last_ruin_date") else None
+        self.name = dict.get("name", "")
+        self.long_edge_interrupts = dict.get("long_edge_interrupts", True)
+
+    def to_dict(self):
+        return {
+            "min_edge_hold_time": self.min_edge_hold_time,
+            "max_edge_hold_time": self.max_edge_hold_time,
+            "min_long_hold_time": self.min_long_hold_time,
+            "max_long_hold_time": self.max_long_hold_time,
+            "min_extreme_hold_time": self.min_extreme_hold_time,
+            "max_extreme_hold_time": self.max_extreme_hold_time,
+            "age": self.age,
+            "cock_size": self.cock_size,
+            "use_avg_as_threshold": self.use_avg_as_threshold,
+            "has_chastity": self.has_chastity,
+            "chastity_piercing": self.chastity_piercing,
+            "chastity_spikes": self.chastity_spikes,
+            "CockTorture": self.CockTorture,
+            "BallTorture": self.BallTorture,
+            "cbt_level": self.cbt_level,
+            "avg_edge_time": self.avg_edge_time,
+            "long_edge_threshold": self.long_edge_threshold,
+            "_edges_all_time": self._edges_all_time,
+            "_cumulative_edge_time": self._cumulative_edge_time,
+            "last_orgasm_date": utils.string_from_date(self.last_orgasm_date) if self.last_orgasm_date else None,
+            "last_ruin_date": utils.string_from_date(self.last_ruin_date) if self.last_ruin_date else None,
+            "name": self.name,
+            "long_edge_interrupts": self.long_edge_interrupts,
+        }
 
 
 # stubbing for now
@@ -218,8 +300,8 @@ settings_dict = {
     "current_personality": "Joi",
     "taunt_cycle_min": 60,
     "taunt_cycle_max": 300,
-    "min_tease_length": 15 * 60,
-    "max_tease_length": 45 * 60,
+    "min_tease_length": 15,
+    "max_tease_length": 45,
     "domme_delete": False,
     "boobs_images": "",
     "butts_images": "",
@@ -248,6 +330,7 @@ settings_dict = {
     "writing_task_lines_max": 20,
     "orgasm_lock_date": "05/09/2026 09:15:40",
     "offline_mode": False,
+    "interrupt_long_edge": True,
 }
 
 sub_dict = {
@@ -260,7 +343,7 @@ sub_dict = {
     "max_extreme_hold_time": 60,
     "age": 18,
     "cock_size": 5,
-    "use_avg_as_threshold": False,
+    "use_avg_as_threshold": True,
     "has_chastity": False,
     "chastity_piercing": False,
     "chastity_spikes": False,
@@ -275,66 +358,181 @@ sub_dict = {
     "_cumulative_edge_time": 1000,
     "last_orgasm_date": "03/09/2026 09:15:40",
     "last_ruin_date": "03/09/2026 09:15:40",
+    "long_edge_interrupts": True,
 }
 
 
 class Settings:
     def __init__(self):
         self.Domme = DommeObj()
-        self.Domme.from_dict(domme_dict)
         self.Contact1 = Contact(1)
-        self.Contact1.from_dict(contact1_dict)
         self.Contact2 = Contact(2)
-        self.Contact2.from_dict(contact1_dict)
         self.Contact3 = Contact(3)
-        self.Contact3.from_dict(contact1_dict)
         self.Contact4 = Contact(4)
-        self.Contact4.from_dict(contact1_dict)
         self.Contact5 = Contact(5)
-        self.Contact5.from_dict(contact1_dict)
         self.Contact6 = Contact(6)
-        self.Contact6.from_dict(contact1_dict)
         self.Sub = Sub()
-        self.Sub.from_dict(sub_dict)
-        self.current_personality = settings_dict["current_personality"]
-        self.taunt_cycle_min = settings_dict["taunt_cycle_min"]
-        self.taunt_cycle_max = settings_dict["taunt_cycle_max"]
-        self.min_tease_length = settings_dict["min_tease_length"]
-        self.max_tease_length = settings_dict["max_tease_length"]
-        self.domme_delete = False
-        self.boobs_images = settings_dict["boobs_images"]
-        self.butts_images = settings_dict["butts_images"]
-        self.joi_video = settings_dict["joi_video"]
-        self.general_images = settings_dict["general_images"]
-        self.captions_images = settings_dict["captions_images"]
-        self.maledom_images = settings_dict["maledom_images"]
-        self.gay_images = settings_dict["gay_images"]
-        self.hentai_images = settings_dict["hentai_images"]
-        self.lezdom_images = settings_dict["lezdom_images"]
-        self.femdom_images = settings_dict["femdom_images"]
-        self.blowjob_images = settings_dict["blowjob_images"]
-        self.lesbian_images = settings_dict["lesbian_images"]
-        self.softcore_images = settings_dict["softcore_images"]
-        self.hardcore_iamges = settings_dict["hardcore_images"]
-        self.joi_video = settings_dict["joi_video"]
-        self.hardcore_video = settings_dict["hardcore_video"]
-        self.softcore_video = settings_dict["softcore_video"]
-        self.lesbian_video = settings_dict["lesbian_video"]
-        self.blowjob_video = settings_dict["blowjob_video"]
-        self.femdom_video = settings_dict["femdom_video"]
-        self.femsub_video = settings_dict["femsub_video"]
-        self.ch_video = settings_dict["ch_video"]
-        self.general_video = settings_dict["general_video"]
-        self.randomize_slides = settings_dict["randomize_slides"]
+        self.Variables = {}
+        self.Flags = {}
+        self.load()
+
+        self.Domme.avatar_backup = None
+        self.Domme.name_backup = None
         self._edge_start = None
-        self.writing_task_lines_min = settings_dict["writing_task_lines_min"]
-        self.writing_task_lines_max = settings_dict["writing_task_lines_max"]
-        self.offline_mode = settings_dict["offline_mode"]
-        Bus.sub("new_message", self._on_new_message)
+
+        Bus.register("save_settings", lambda *args: self.save())
         Bus.register("randomize_value_requested", self._on_randomize_value_requested)
         Bus.register("merge_subfolders_value_requested", self._on_merge_subfolders_value_requested)
         Bus.register("offline_mode_setting_requested", self._on_offline_mode_setting_requested)
         Bus.register("get_current_personality", self._on_get_current_personality)
+        Bus.register("set_personality", self._on_set_personality)
+
+    def load(self):
+        filepath = os.path.join(APPLICATION_ROOT, "settings.json")
+        if os.path.exists(filepath):
+            try:
+                with open(filepath, "r") as f:
+                    data = json.load(f)
+            except Exception:
+                data = self._default_dict()
+        else:
+            data = self._default_dict()
+
+        self.Domme.from_dict(data.get("Domme", domme_dict))
+        self.Contact1.from_dict(data.get("Contact1", contact1_dict))
+        self.Contact2.from_dict(data.get("Contact2", contact1_dict))
+        self.Contact3.from_dict(data.get("Contact3", contact1_dict))
+        self.Contact4.from_dict(data.get("Contact4", contact1_dict))
+        self.Contact5.from_dict(data.get("Contact5", contact1_dict))
+        self.Contact6.from_dict(data.get("Contact6", contact1_dict))
+        self.Sub.from_dict(data.get("Sub", sub_dict))
+
+        self.current_personality = data.get("current_personality", settings_dict["current_personality"])
+        self.taunt_cycle_min = data.get("taunt_cycle_min", settings_dict["taunt_cycle_min"])
+        self.taunt_cycle_max = data.get("taunt_cycle_max", settings_dict["taunt_cycle_max"])
+        self.min_tease_length = data.get("min_tease_length", settings_dict["min_tease_length"] * 60)
+        self.max_tease_length = data.get("max_tease_length", settings_dict["max_tease_length"] * 60)
+        self.domme_delete = data.get("domme_delete", settings_dict.get("domme_delete", False))
+
+        for k in [
+            "boobs_images",
+            "butts_images",
+            "joi_video",
+            "general_images",
+            "captions_images",
+            "maledom_images",
+            "gay_images",
+            "hentai_images",
+            "lezdom_images",
+            "femdom_images",
+            "blowjob_images",
+            "lesbian_images",
+            "softcore_images",
+            "hardcore_images",
+            "hardcore_video",
+            "softcore_video",
+            "lesbian_video",
+            "blowjob_video",
+            "femdom_video",
+            "femsub_video",
+            "ch_video",
+            "general_video",
+        ]:
+            setattr(self, k, data.get(k, settings_dict.get(k, "")))
+            if k == "hardcore_images":
+                self.hardcore_iamges = data.get(k, settings_dict.get(k, ""))
+
+        self.randomize_slides = data.get("randomize_slides", settings_dict["randomize_slides"])
+        self.interrupt_long_edge = data.get("interrupt_long_edge", settings_dict["interrupt_long_edge"])
+        self.writing_task_lines_min = data.get("writing_task_lines_min", settings_dict["writing_task_lines_min"])
+        self.writing_task_lines_max = data.get("writing_task_lines_max", settings_dict["writing_task_lines_max"])
+        self.offline_mode = data.get("offline_mode", settings_dict["offline_mode"])
+
+        self.Variables = data.get("Variables", {})
+        self.Flags = data.get("Flags", {})
+
+    def save(self):
+        filepath = os.path.join(APPLICATION_ROOT, "settings.json")
+        temp_path = filepath + ".tmp"
+        try:
+            with open(temp_path, "w") as f:
+                json.dump(self.to_dict(), f, indent=4)
+            if os.path.exists(filepath):
+                os.replace(temp_path, filepath)
+            else:
+                os.rename(temp_path, filepath)
+        except Exception as e:
+            print(f"Failed to save settings: {e}")
+
+    def to_dict(self):
+        base = self._default_dict()
+        base["Domme"] = self.Domme.to_dict()
+        base["Contact1"] = self.Contact1.to_dict()
+        base["Contact2"] = self.Contact2.to_dict()
+        base["Contact3"] = self.Contact3.to_dict()
+        base["Contact4"] = self.Contact4.to_dict()
+        base["Contact5"] = self.Contact5.to_dict()
+        base["Contact6"] = self.Contact6.to_dict()
+        base["Sub"] = self.Sub.to_dict()
+
+        base["current_personality"] = self.current_personality
+        base["taunt_cycle_min"] = self.taunt_cycle_min
+        base["taunt_cycle_max"] = self.taunt_cycle_max
+        base["min_tease_length"] = self.min_tease_length
+        base["max_tease_length"] = self.max_tease_length
+        base["domme_delete"] = self.domme_delete
+
+        for k in [
+            "boobs_images",
+            "butts_images",
+            "joi_video",
+            "general_images",
+            "captions_images",
+            "maledom_images",
+            "gay_images",
+            "hentai_images",
+            "lezdom_images",
+            "femdom_images",
+            "blowjob_images",
+            "lesbian_images",
+            "softcore_images",
+            "hardcore_images",
+            "hardcore_video",
+            "softcore_video",
+            "lesbian_video",
+            "blowjob_video",
+            "femdom_video",
+            "femsub_video",
+            "ch_video",
+            "general_video",
+        ]:
+            val = getattr(self, k, "")
+            base[k] = val
+        base["hardcore_images"] = getattr(self, "hardcore_iamges", base["hardcore_images"])
+
+        base["randomize_slides"] = self.randomize_slides
+        base["interrupt_long_edge"] = self.interrupt_long_edge
+        base["writing_task_lines_min"] = self.writing_task_lines_min
+        base["writing_task_lines_max"] = self.writing_task_lines_max
+        base["offline_mode"] = self.offline_mode
+        base["Variables"] = self.Variables
+        base["Flags"] = self.Flags
+        return base
+
+    def _default_dict(self):
+        d = settings_dict.copy()
+        d["Domme"] = domme_dict
+        d["Contact1"] = contact1_dict
+        d["Contact2"] = contact1_dict
+        d["Contact3"] = contact1_dict
+        d["Contact4"] = contact1_dict
+        d["Contact5"] = contact1_dict
+        d["Contact6"] = contact1_dict
+        d["Sub"] = sub_dict
+        return d
+
+    def _on_set_personality(self, name):
+        self.current_personality = name
 
     def _on_get_current_personality(self, pers_dict):
         pers_dict["personality"] = self.current_personality
@@ -347,19 +545,6 @@ class Settings:
 
     def _on_randomize_value_requested(self, obj, attr):
         setattr(obj, attr, self.randomize_slides)
-
-    def _on_edge_start(self):
-        self._edge_start = datetime.now()
-
-    def _on_new_message(self, message):
-        if isinstance(message, UserMessage):
-            for word in ["edge", "edging"]:
-                if word in message.text and self._edge_start is not None:
-                    delta_time = datetime.now() - self._edge_start
-                    self.Sub._cumulative_edge_time += delta_time.seconds
-                    self.Sub._edges_all_time += 1
-                    self.Sub.avg_edge_time = self.Sub._cumulative_edge_time / self.Sub._edges_all_time
-                    self._edge_start = None
 
     def contact_namespace(self, id, attr):
         contact = None
@@ -379,6 +564,12 @@ class Settings:
         if attr == "object":
             return contact
         return getattr(contact, attr)
+
+    def domme_id_to_object(self, id):
+        if id == "D":
+            return self.Domme
+        elif id > 0 and id < 7:
+            return self.contact_namespace(id, "object")
 
     def domme_namespace(self, attr):
         return getattr(self.Domme, attr)

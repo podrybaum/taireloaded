@@ -1,248 +1,250 @@
-from kivymd.app import MDApp
-from kivy.properties import BooleanProperty
-from kivy.properties import NumericProperty
-from kivy.core.window import Window
-from kivy.uix.floatlayout import FloatLayout
-from kivymd.uix.label import MDLabel
-from kivymd.uix.textfield import MDTextField
-from kivymd.uix.divider import MDDivider
-from kivymd.uix.screen import MDScreen
-from kivymd.uix.tab import MDTabsItemText, MDTabsSecondary, MDTabsItemSecondary
-from kivy.uix.boxlayout import BoxLayout
-from kivy.modules import inspector
-from draggable_title_bar import DraggableTitleBar
-from kivy.metrics import dp
-from img_tags import CheckboxControl
-from main import runtime
-from kivymd.theming import ThemableBehavior
-from kivymd.uix.behaviors import BackgroundColorBehavior
-from kivymd.uix.behaviors.elevation import CommonElevationBehavior
+from PySide6.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QCheckBox,
+    QTabWidget,
+    QGroupBox,
+    QPushButton,
+    QSpinBox,
+    QLineEdit,
+    QGridLayout,
+)
+from PySide6.QtCore import Qt
+from theme import THEME
 
 
-SETTINGS_CONTROL_LABEL_WIDTH = dp(250)
+class SettingsCard(QGroupBox):
+    def __init__(self, title, layout_class=QVBoxLayout, parent=None):
+        super().__init__(title, parent)
+        self.layout = layout_class(self)
+        self.layout.setContentsMargins(10, 20, 10, 10)
+        self.layout.setSpacing(10)
+        self.setStyleSheet(f"""
+            QGroupBox {{ 
+                border: 1px solid {THEME["ui_secondary_border"]}; 
+                border-radius: 8px; 
+                margin-top: 15px; 
+                font-weight: bold; 
+                color: {THEME["highlighted_disabled"]}; 
+            }}
+            QGroupBox::title {{ subcontrol-origin: margin; left: 10px; padding: 0 5px; color: {THEME["highlighted"]}; }}
+        """)
 
 
-class SettingsCheckboxControl(CheckboxControl):
-    active = BooleanProperty(False)
-
-    def __init__(self, disabled=False, **kwargs):
-        self.name = kwargs.pop("name")
-        self._disabled_value = disabled
-        super().__init__(**kwargs)
-        # Apply the specialized dp(38) layout for settings specifically
-        self.size_hint = (None, None)
-        self.height = dp(38)
-        self.spacing = dp(5)
-        self.padding = dp(5)
-        self.valign = "top"
-
-        # Override children created by CheckboxControl
-        self.checkbox.size_hint = (None, None)
-        self.checkbox.size = (dp(24), dp(24))
-        self.checkbox.pos_hint = {"top": 1}
-        self.checkbox.disabled = self._disabled_value
-
-        self.label.size_hint = (None, None)
-        self.label.width = SETTINGS_CONTROL_LABEL_WIDTH
-        self.label.height = dp(24)
-        self.label.font_size = 18
-        self.label.text_color = "#FFFFFF" if not self.disabled else "#3D3D3D"
-        self.label.pos_hint = {"top": 1}
-        self.label.valign = "bottom"
-        self.label.bind(size=self.label.setter("text_size"))
-
-        # Invert order for settings
-        self.remove_widget(self.checkbox)
-        self.add_widget(self.checkbox)
-
-        # Link logic
-        self.checkbox.bind(active=self.setter("active"))
-        self.bind(active=lambda inst, val: setattr(self.checkbox, "active", val))
-
-    def on_active(self, instance, value):
-        runtime.settings.set(self.name, value)
-
-
-class NumericTextFieldEntry(BoxLayout):
-    def __init__(self, name, label, value, **kwargs):
-        super().__init__(**kwargs)
+class SettingsCheckbox(QCheckBox):
+    def __init__(self, text, name, parent=None):
+        super().__init__(text, parent)
         self.name = name
-        self.label = MDLabel(text=label)
-        self.value = NumericProperty(value)
-        self.size_hint = (None, None)
-        self.height = dp(30)
-        self.spacing = dp(5)
-        self.padding = dp(5)
-        self.label.size_hint = (None, None)
-        self.text_field = MDTextField(text=str(value))
-        self.text_field.size_hint = (None, None)
-        self.label.pos_hint = {"center_y": 0.5}
-        self.text_field.pos_hint = {"center_y": 0.5}
-        self.label.font_size = 18
-        self.text_field.font_size = 14
-        self.text_field.height = dp(30)
-        self.add_widget(self.label)
-        self.add_widget(self.text_field)
-        self.label.width = SETTINGS_CONTROL_LABEL_WIDTH
-        self.label.valign = "bottom"
-        self.label.height = self.text_field.height
-        self.text_field.width = dp(50)
-        self.text_field.bind(text=self.setter("value"))
+        # Initialize from runtime settings
+        val = runtime.settings.get(name)
+        self.setChecked(bool(val))
+        self.stateChanged.connect(self._on_changed)
+        self.setStyleSheet(f"""
+            QCheckBox {{ color: {THEME["ui_text"]}; font-size: 14px; padding: 5px; }}
+            QCheckBox:hover {{ color: {THEME["highlighted"]}; }}
+            QCheckBox::indicator {{ width: 16px; height: 16px; border: 1px solid {THEME["ui_secondary_border"]}; background: {THEME["ui_secondary"]}; border-radius: 4px; }}
+            QCheckBox::indicator:hover {{ border: 1px solid {THEME["highlighted"]}; }}
+            QCheckBox::indicator:checked {{ background: {THEME["highlighted"]}; border: 1px solid {THEME["highlighted"]}; }}
+        """)
 
-    def on_value(self, instance, value):
-        runtime.settings.set(self.name, int(value))
+    def _on_changed(self, state):
+        runtime.settings.set(self.name, state == Qt.Checked)
 
 
-class SettingsCard(FloatLayout, CommonElevationBehavior, ThemableBehavior, BackgroundColorBehavior):
-    def __init__(self, label, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.size_hint = (None, None)
-        self.width = SETTINGS_CONTROL_LABEL_WIDTH + dp(77)
-        self.spacing = dp(5)
-        self.theme_bg_color = "Custom"
-        self.md_bg_color = (0.08, 0.08, 0.1, 1)
-        self.theme_line_color = "Custom"
-        self.line_color = "#545454"
-        self.radius = dp(8)
-        # self.padding = [dp(5), dp(-5), dp(5), dp(-1)]
-        self.content = BoxLayout(orientation="vertical", size_hint=(1, 1))
-        self.label = MDLabel(text=f" {label}")
-        self.label.theme_bg_color = "Custom"
-        self.label.md_bg_color = (0, 0, 0, 1)
-        self.label.size_hint = (None, None)
-        self.label.theme_text_color = "Custom"
-        self.label.text_color = "#545454"
-        self.label.height = dp(20)
-        self.label.width = dp(len(self.label.text) * dp(5))
-        self.label.font_size = dp(12)
-        self.label.valign = "center"
-        # self.label.pos_hint = {"x": 0.05}
-        poss, posy = self.to_parent(self.x, self.top)
-        self.label.pos_hint = {"center_y": 1, "x": 0.05}
-        self.add_widget(self.label)
-        self.add_widget(self.content)
+class SettingsNumericEntry(QWidget):
+    def __init__(self, label, name, value, parent=None):
+        super().__init__(parent)
+        self.layout = QHBoxLayout(self)
+        self.layout.setContentsMargins(0, 0, 0, 0)
 
-    # self.on_leave()
+        self.label = QLabel(label)
+        self.label.setFixedWidth(200)
+        self.label.setStyleSheet(f"color: {THEME['ui_text']}; font-size: 14px;")
 
-    # def on_enter(self, *args):
-    #    return True
+        self.spin = QSpinBox()
+        self.spin.setValue(int(value))
+        self.spin.setRange(0, 999)
+        self.spin.setFixedWidth(60)
+        self.spin.setStyleSheet(f"""
+            QSpinBox {{
+                background: {THEME["ui_secondary"]}; 
+                border: 1px solid {THEME["ui_secondary_border"]}; 
+                color: {THEME["ui_text"]}; 
+                padding: 4px;
+                border-radius: 4px;
+            }}
+            QSpinBox:hover {{
+                border: 1px solid {THEME["highlighted"]};
+                background: {THEME["ui_secondary_hover"]};
+            }}
+            QSpinBox::up-button, QSpinBox::down-button {{
+                background: {THEME["ui_secondary_hover"]};
+                border: none;
+                width: 16px;
+            }}
+            QSpinBox::up-button:hover, QSpinBox::down-button:hover {{
+                background: {THEME["highlighted_shadow"]};
+            }}
+        """)
+        self.spin.valueChanged.connect(lambda val: runtime.settings.set(name, int(val)))
 
-    def add_widget(self, *args, **kwargs):
-        if len(self.children) == 2:
-            self.content.add_widget(*args, **kwargs)
-            self.height = self.content.height
-        else:
-            super().add_widget(*args)
+        self.layout.addWidget(self.label)
+        self.layout.addWidget(self.spin)
+        self.layout.addStretch()
 
 
-class Settings_UI(MDScreen):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.size_hint = (None, None)
-        self.size = (dp(1000), dp(674))
-        Window.size = (1000, 674)
-        self.layout = BoxLayout(orientation="vertical", size_hint=(1, 1))
-        self.layout.bind(height=self.setter("height"))
-        self.title_bar = DraggableTitleBar(controls=False, draggable_target=self, pos_hint={"top": 1})
-        self.title_bar.title_label.text = "Settings"
-        self.layout.add_widget(self.title_bar)
-        self.tabs = MDTabsSecondary(pos_hint={"center_x": 0.5, "center_y": 0.5}, size_hint=(1, None))
-        self.layout.add_widget(self.tabs)
-        inspector.create_inspector(Window, self)
+class SettingsTextEntry(QWidget):
+    def __init__(self, label, name, value, parent=None):
+        super().__init__(parent)
+        self.layout = QHBoxLayout(self)
+        self.layout.setContentsMargins(0, 0, 0, 0)
 
-        self.general_settings = BoxLayout(orientation="vertical", size_hint=(1, None), height=dp(600))
-        self.sub_settings = BoxLayout(
-            orientation="vertical", size_hint=(1, None), height=dp(600), spacing=dp(5), padding=dp(5)
+        self.label = QLabel(label)
+        self.label.setFixedWidth(200)
+        self.label.setStyleSheet(f"color: {THEME['ui_text']}; font-size: 14px;")
+
+        self.text = QLineEdit()
+        self.text.setText(value)
+        self.text.setFixedWidth(60)
+        self.text.setStyleSheet(f"""
+            QLineEdit {{
+                background: {THEME["ui_secondary"]}; 
+                border: 1px solid {THEME["ui_secondary_border"]}; 
+                color: {THEME["ui_text"]}; 
+                padding: 4px;
+                border-radius: 4px;
+            }}
+            QLineEdit:hover {{
+                border: 1px solid {THEME["highlighted"]};
+                background: {THEME["ui_secondary_hover"]};
+            }}
+        """)
+        self.text.textChanged.connect(lambda val: runtime.settings.set(name, val))
+
+        self.layout.addWidget(self.label)
+        self.layout.addWidget(self.text)
+        self.layout.addStretch()
+
+
+class SettingsWindow(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Settings")
+        self.resize(800, 650)
+        self.setStyleSheet(
+            f"#SettingsWindow {{ background-color: {THEME['ui_primary']}; }} QWidget {{ color: {THEME['ui_text']}; }}"
         )
-        self.domme_settings = BoxLayout(orientation="vertical", size_hint=(1, None))
-        self.contacts_settings = BoxLayout(orientation="vertical", size_hint=(1, None))
-        self.image_folders = BoxLayout(orientation="vertical", size_hint=(1, None), spacing=dp(10))
-        self._tab_panels = {
-            "General": self.general_settings,
-            "Sub": self.sub_settings,
-            "Domme": self.domme_settings,
-            "Contacts": self.contacts_settings,
-            "Image Folders": self.image_folders,
-        }
-        self._active_panel = self.general_settings
-        self._add_tabs()
-        self.tabs.bind(on_tab_switch=self.switch_tab)
-        # General Settings
-        domme_delete = SettingsCheckboxControl(text="Allow Domme to delete local media?", name="domme_delete")
-        domme_delete.active = runtime.settings.domme_delete
-        self.general_settings.add_widget(domme_delete)
-        randomize_slides = SettingsCheckboxControl(text="Randomize order of image slideshows?", name="randomize_slides")
-        randomize_slides.active = runtime.settings.randomize_slides
-        self.general_settings.add_widget(randomize_slides)
-        offline_mode = SettingsCheckboxControl(text="Offline Mode - (disables URL files )", name="offline_mode")
-        offline_mode.active = runtime.settings.offline_mode
-        general_sizer = BoxLayout(size_hint=(1, 1))
-        self.general_settings.add_widget(offline_mode)
-        self.general_settings.add_widget(general_sizer)
 
-        # Sub Settings
-        stats_box = SettingsCard(label="Stats")
-        sub_age = NumericTextFieldEntry(name="Sub.age", label="Age", value=runtime.settings.Sub.age)
-        stats_box.add_widget(sub_age)
-        sub_cock_size = NumericTextFieldEntry(
-            name="Sub.cock_size", label="Cock Size", value=runtime.settings.Sub.cock_size
-        )
-        stats_box.add_widget(sub_cock_size)
-        self.sub_settings.add_widget(stats_box)
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(20, 20, 20, 20)
 
-        sub_has_chastity = SettingsCheckboxControl(name="Sub.has_chastity", text="Owns a chastity device")
-        self.sub_settings.add_widget(sub_has_chastity)
-        sub_chastity_piercing = SettingsCheckboxControl(
-            name="Sub.chastity_piercing", text="Chastity device requires piercing", disabled=True
-        )
-        self.sub_settings.add_widget(sub_chastity_piercing)
-        sub_chastity_spikes = SettingsCheckboxControl(
-            name="Sub.chastity_spikes", text="Chastity device has spikes", disabled=True
-        )
-        self.sub_settings.add_widget(sub_chastity_spikes)
+        # We'll use a QTabWidget for the main categories
+        self.tabs = QTabWidget()
+        self.tabs.setStyleSheet(f"""
+            QTabWidget::pane {{ border: 1px solid {THEME["ui_secondary_border"]}; background: {THEME["ui_primary"]}; border-radius: 4px; }}
+            QTabBar::tab {{ background: {THEME["ui_secondary"]}; padding: 12px 25px; border-right: 1px solid {THEME["ui_secondary_border"]}; border-bottom: 1px solid {THEME["ui_secondary_border"]}; color: {THEME["ui_text"]}; border-top-left-radius: 4px; border-top-right-radius: 4px; margin-right: 2px; }}
+            QTabBar::tab:selected {{ background: {THEME["ui_primary"]}; border-bottom: 2px solid {THEME["highlighted"]}; color: {THEME["highlighted"]}; }}
+            QTabBar::tab:hover:!selected {{ background: {THEME["ui_secondary_hover"]}; color: {THEME["highlighted"]}; }}
+        """)
+        self.layout.addWidget(self.tabs)
 
-        # Finish Layout Init
-        self.add_widget(self.layout)
-        self.switch_tab(self.tabs.children, self.tabs.children[1], "Sub")
+        self._setup_general_tab()
+        self._setup_sub_tab()
+        self._setup_domme_tab()
+        self._setup_contacts_tab()
 
-    def _add_tabs(self, *args):
-        for tab_name in ["General", "Sub", "Domme", "Contacts"]:
-            self.tabs.add_widget(MDTabsItemSecondary(MDTabsItemText(text=tab_name)))
-        self.tabs.add_widget(MDDivider())
-        self.tabs.height = dp(50)
-        self.title_bar.height = dp(24)
-        self._active_panel.size_hint = (1, None)
-        self._active_panel.height = dp(600)
+        # Close button at bottom
+        self.btn_close = QPushButton("Apply & Close")
+        self.btn_close.clicked.connect(self.close)
+        self.btn_close.setFixedWidth(120)
+        self.btn_close.setStyleSheet(f"""
+            QPushButton {{ 
+                background-color: {THEME["ui_secondary"]}; 
+                border: 1px solid {THEME["ui_secondary_border"]}; 
+                color: {THEME["ui_text"]};
+                padding: 10px; 
+                border-radius: 4px; 
+                font-weight: bold; 
+            }}
+            QPushButton:hover {{ 
+                background-color: {THEME["ui_secondary_hover"]}; 
+                border: 1px solid {THEME["highlighted"]};
+                color: {THEME["highlighted"]};
+            }}
+        """)
+        self.layout.addWidget(self.btn_close, alignment=Qt.AlignRight)
 
-    def switch_tab(self, instance_tabs, instance_tab, *args):
-        print(args)
-        if args and isinstance(args[0], str):
-            instance_tab_label = args[0]
-        else:
-            instance_tab_label = ""
-            for child in instance_tab.children:
-                if isinstance(child, MDTabsItemText):
-                    instance_tab_label = child.text
-                    break
+    def _setup_general_tab(self):
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setSpacing(10)
 
-        print(instance_tab_label)
-        panel = self._tab_panels.get(instance_tab_label)
-        if panel is None or panel is self._active_panel:
-            return
-        self.layout.remove_widget(self._active_panel)
-        self._active_panel = panel
-        self.layout.add_widget(panel)
-        self._active_panel = panel
+        layout.addWidget(SettingsCheckbox("Allow Domme to delete local media?", "domme_delete"))
+        layout.addWidget(SettingsCheckbox("Randomize order of image slideshows?", "randomize_slides"))
+        layout.addWidget(SettingsCheckbox("Offline Mode - (disables URL files )", "offline_mode"))
+        layout.addStretch()
 
+        self.tabs.addTab(tab, "General")
 
-class MyApp(MDApp):
-    def build(self):
-        self.theme_cls.primary_palette = "Indigo"
-        self.theme_cls.accent_palette = "Amber"
-        self.theme_cls.theme_style = "Dark"
-        self.theme_cls.material_style = "M3"
-        return Settings_UI()
+    def _setup_sub_tab(self):
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setSpacing(10)
+
+        # Stats Card
+        stats = SettingsCard("Stats")
+        stats.layout.addWidget(SettingsNumericEntry("Age", "Sub.age", runtime.settings.Sub.age))
+        stats.layout.addWidget(SettingsNumericEntry("Cock Size", "Sub.cock_size", runtime.settings.Sub.cock_size))
+        layout.addWidget(stats)
+
+        # Property Settings
+        layout.addWidget(SettingsCheckbox("Owns a chastity device", "Sub.has_chastity"))
+        layout.addWidget(SettingsCheckbox("Chastity device requires piercing", "Sub.chastity_piercing"))
+        layout.addWidget(SettingsCheckbox("Chastity device has spikes", "Sub.chastity_spikes"))
+
+        layout.addStretch()
+        self.tabs.addTab(tab, "Sub")
+
+    def _setup_domme_tab(self):
+        tab = QWidget()
+        layout = QGridLayout(tab)
+        stats = SettingsCard("Stats")
+        stats.layout.addWidget(SettingsTextEntry("Name", "Domme.name", runtime.settings.Domme.name))
+        stats.layout.addWidget(SettingsNumericEntry("Age", "Domme.age", runtime.settings.Domme.age))
+        stats.layout.addWidget(SettingsTextEntry("Honorific", "Domme.honorific", runtime.settings.Domme.honorific))
+        stats.layout.addWidget(SettingsTextEntry("Short Name", "Domme.short_name", runtime.settings.Domme.short_name))
+        layout.addWidget(stats, 0, 0)
+        personality = SettingsCard("Personality", QGridLayout)
+        personality.layout.addWidget(SettingsCheckbox("CFNM", "cfnm"), 0, 0)
+        personality.layout.addWidget(SettingsCheckbox("Crazy", "crazy"), 0, 1)
+        personality.layout.addWidget(SettingsCheckbox("Sadistic", "sadistic"), 1, 0)
+        personality.layout.addWidget(SettingsCheckbox("Vulgar", "vulgar"), 1, 1)
+        personality.layout.addWidget(SettingsCheckbox("Supremacist", "supremacist"), 2, 0)
+        personality.layout.addWidget(SettingsCheckbox("Degrading", "degrading"), 2, 1)
+        layout.addWidget(personality, 0, 1)
+
+        self.tabs.addTab(tab, "Domme")
+
+    def _setup_contacts_tab(self):
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.addWidget(QLabel("Contacts settings (Placeholder for Pass 2)"))
+        layout.addStretch()
+        self.tabs.addTab(tab, "Contacts")
 
 
 if __name__ == "__main__":
-    MyApp().run()
+    import sys
+    from PySide6.QtWidgets import QApplication
+    from ui_qt import load_application_fonts
+
+    app = QApplication(sys.argv)
+    load_application_fonts()
+    window = SettingsWindow()
+    window.setObjectName("SettingsWindow")
+    window.show()
+    sys.exit(app.exec())

@@ -1,12 +1,14 @@
 import os
 import random
 from abc import abstractmethod, ABC
+from bus import Bus
 
 from dispatch_dict import DISPATCH_DICT
 from tai_exceptions import NotImplementedErr, SyntaxErr, TypeErr, RuntimeErr
-from utils import is_valid_filename
+from utils import is_valid_filename, get_settings
 
 APPLICATION_ROOT = os.path.dirname(os.path.abspath(__file__))
+
 
 class Token(ABC):
     def __init__(self, line, pos, path, value):
@@ -19,7 +21,7 @@ class Token(ABC):
     @abstractmethod
     def __repr__(self):
         raise NotImplementedError
-    
+
     @abstractmethod
     def Accept(self, other):
         raise NotImplementedError
@@ -112,7 +114,7 @@ class StringToken(Token, Evaluable):
         self.ttype = "STRING"
 
     def Accept(self, other):
-        return other.VisistStringToken(self)
+        return other.VisitStringToken(self)
 
     def Evaluate(self):
         return self.value
@@ -187,8 +189,7 @@ class OperatorToken(Token):
                     return left.replace(right, "")
                 else:
                     NotImplementedErr(
-                        f"Operation not implemented for types {type(left)} and {type(right)}.",
-                        *self.get_position()
+                        f"Operation not implemented for types {type(left)} and {type(right)}.", *self.get_position()
                     ).throw()
             case "*":
                 if isinstance(left, int) and isinstance(right, int):
@@ -205,8 +206,7 @@ class OperatorToken(Token):
                     return ret_value
                 else:
                     NotImplementedErr(
-                        f"Operation not implemented for types {type(left)} and {type(right)}.",
-                        *self.get_position()
+                        f"Operation not implemented for types {type(left)} and {type(right)}.", *self.get_position()
                     ).throw()
             case "/":
                 if isinstance(left, int) and isinstance(right, int):
@@ -214,29 +214,25 @@ class OperatorToken(Token):
                         return left / right
                     else:
                         TypeErr(
-                            "Division results in floating point value, not currently supported.",
-                            *self.get_position()
+                            "Division results in floating point value, not currently supported.", *self.get_position()
                         ).throw()
                 else:
                     NotImplementedErr(
-                        f"Operation not implemented for types {type(left)} and {type(right)}.",
-                        *self.get_position()
+                        f"Operation not implemented for types {type(left)} and {type(right)}.", *self.get_position()
                     ).throw()
             case "^":
                 if isinstance(left, int) and isinstance(right, int):
                     return left**right
                 else:
                     NotImplementedErr(
-                        f"Operation not implemented for types {type(left)} and {type(right)}.",
-                        *self.get_position()
+                        f"Operation not implemented for types {type(left)} and {type(right)}.", *self.get_position()
                     ).throw()
             case "%":
                 if isinstance(left, int) and isinstance(right, int):
                     return left % right
                 else:
                     NotImplementedErr(
-                        f"Operation not implemented for types {type(left)} and {type(right)}.",
-                        *self.get_position()
+                        f"Operation not implemented for types {type(left)} and {type(right)}.", *self.get_position()
                     ).throw()
             case "==":
                 return left == right
@@ -245,16 +241,14 @@ class OperatorToken(Token):
                     return left > right
                 else:
                     NotImplementedErr(
-                        f"Operation not implemented for types {type(left)} and {type(right)}.",
-                        *self.get_position()
+                        f"Operation not implemented for types {type(left)} and {type(right)}.", *self.get_position()
                     ).throw()
             case "<":
                 if isinstance(left, int) and isinstance(right, int):
                     return left < right
                 else:
                     NotImplementedErr(
-                        f"Operation not implemented for types {type(left)} and {type(right)}.",
-                        *self.get_position()
+                        f"Operation not implemented for types {type(left)} and {type(right)}.", *self.get_position()
                     ).throw()
             case "AND":
                 return left.Bool() and right.Bool()
@@ -265,31 +259,39 @@ class OperatorToken(Token):
                     return left >= right
                 else:
                     NotImplementedErr(
-                        f"Operation not implemented for types {type(left)} and {type(right)}.",
-                        *self.get_position()
+                        f"Operation not implemented for types {type(left)} and {type(right)}.", *self.get_position()
                     ).throw()
             case "<=":
                 if isinstance(left, int) and isinstance(right, int):
                     return left <= right
                 else:
                     NotImplementedErr(
-                        f"Operation not implemented for types {type(left)} and {type(right)}.",
-                        *self.get_position()
+                        f"Operation not implemented for types {type(left)} and {type(right)}.", *self.get_position()
                     ).throw()
             case "!=":
                 return left != right
+            case "EQUALS":
+                if not isinstance(left_token, VarRef):
+                    SyntaxErr("Not a valid target for assignment.", self.line, self.pos, self.path).throw()
+                else:
+                    left_token.assign(right)
+                    return right
             case "+=":
-                if not isinstance(VarRef, left_token):
+                if not isinstance(left_token, VarRef):
                     SyntaxErr("Not a valid target for assignment.", self.line, self.pos, self.path).throw()
                 else:
-                    # TODO increment variable value
-                    pass
+                    if isinstance(left, int) and isinstance(right, int):
+                        left_token.assign(left + right)
+                    else:
+                        left_token.assign(str(left) + str(right))
             case "-=":
-                if not isinstance(VarRef, left_token):
+                if not isinstance(left_token, VarRef):
                     SyntaxErr("Not a valid target for assignment.", self.line, self.pos, self.path).throw()
                 else:
-                    # TODO: decrement variable value
-                    pass
+                    if isinstance(left, int) and isinstance(right, int):
+                        left_token.assign(left - right)
+                    else:
+                        SyntaxErr("Cannot decrement a non-integer value.", self.line, self.pos, self.path).throw()
             case _:
                 NotImplementedErr("Operation not implemented.", self.line, self.pos, self.path).throw()
 
@@ -318,20 +320,24 @@ class UnaryOperatorToken(Token):
     def Execute(self, operand):
         op_value = operand.Evaluate()
         match self.value:
-            case "INC":
-                if not isinstance(VarRef, operand):
+            case "++":
+                if not isinstance(operand, VarRef):
                     SyntaxErr("Not a valid target for assignment.", self.line, self.pos, self.path).throw()
                 else:
-                    # TODO: Increment variable value by 1
-                    pass
-            case "DEC":
-                if not isinstance(VarRef, operand):
+                    if isinstance(op_value, int):
+                        operand.assign(op_value + 1)
+                    else:
+                        SyntaxErr("Cannot increment a non-integer value.", self.line, self.pos, self.path).throw()
+            case "--":
+                if not isinstance(operand, VarRef):
                     SyntaxErr("Not a valid target for assignment.", self.line, self.pos, self.path).throw()
                 else:
-                    # TODO: Decrement variable value by 1
-                    pass
+                    if isinstance(op_value, int):
+                        operand.assign(op_value - 1)
+                    else:
+                        SyntaxErr("Cannot decrement a non-integer value.", self.line, self.pos, self.path).throw()
             case "NEG":
-                if isinstance(int, op_value):
+                if isinstance(op_value, int):
                     return -op_value
                 else:
                     NotImplementedErr(
@@ -410,7 +416,7 @@ class KeywordToken(Token, Parameterized):
             self.ttype = "#VAR"
         else:
             self.ttype = "KEYWORD"
-    
+
     def Accept(self, other):
         return other.VisitKeywordToken(self)
 
@@ -429,9 +435,11 @@ class VocabToken(Token, Evaluable):
         super().__init__(line, pos, path, value)
         self.ttype = "VOCAB"
         self.filename = f"{value}.txt"
-        personality_dict = {"personality":""}
+        personality_dict = {"personality": ""}
         Bus.emit("get_current_personality", personality_dict)
-        self.filepath = os.path.join(APPLICATION_ROOT, "Scripts", personality_dict["personality"], "Vocabulary", self.filename)
+        self.filepath = os.path.join(
+            APPLICATION_ROOT, "Scripts", personality_dict["personality"], "Vocabulary", self.filename
+        )
 
     def __repr__(self):
         return f"VocabToken(Line: {self.line}, Column: {self.pos}, File: {self.path}, {self.value})"
@@ -471,7 +479,7 @@ class CommandFilterToken(Token, Parameterized):
 
     def Accept(self, other):
         return other.VisitCommandFilter(self)
-   
+
     def __repr__(self):
         return f"CommandFilterToken(Line: {self.line}, Column: {self.pos}, File: {self.path}, {self.value})"
 
@@ -481,8 +489,6 @@ class VarRef(Evaluable):
         Evaluable.__init__(self)
         self.expr = expr
         self.filename = f"{self.expr.Evaluate()}"
-        if not is_valid_filename(self.filename):
-            RuntimeErr("Variable names must be valid Windows filenames.", *self.expr.get_position()).throw()
         self.filepath = ""
 
     def get_position(self):
@@ -493,22 +499,27 @@ class VarRef(Evaluable):
         return other.VisitVarRef(self)
 
     def Evaluate(self):
-        if not os.path.isfile(self.filepath):
+        vars_dict = getattr(get_settings(), "Variables", {}).setdefault(get_settings().current_personality, {})
+        if self.filename not in vars_dict:
             return f"MISSING_VARIABLE_FILE: {self.filename}"
-        with open(self.filepath, "r") as f:
-            value = f.read()
-            if value == "":
-                return f"CORRUPTED_VARIABLE_FILE: {self.filename}"
-            if int(value):
+        value = vars_dict[self.filename]
+        if value == "":
+            return f"CORRUPTED_VARIABLE_FILE: {self.filename}"
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str):
+            if value.isdigit() or (value.startswith("-") and value[1:].isdigit()):
                 return int(value)
-            if bool(value):
-                return bool(value)
-            else:
-                return value
+            if value == "True":
+                return True
+            if value == "False":
+                return False
+        return value
 
     def assign(self, value):
-        with open(self.filepath, "w") as f:
-            f.write(value)
+        vars_dict = getattr(get_settings(), "Variables", {}).setdefault(get_settings().current_personality, {})
+        vars_dict[self.filename] = str(value)
+        Bus.emit("save_settings")
 
     def Bool(self):
         value = self.Evaluate()

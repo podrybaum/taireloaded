@@ -20,7 +20,6 @@ logging.getLogger("pywebview").setLevel(logging.CRITICAL + 1)
 # TODO: Make the delete key event handler only fire when focus is in the listbox
 # TODO: Add traces to parameter row fields and integrate into the live preview
 # TODO: Fix the "extra or" issue in the html generation logic
-# TODO: Handle the termination of threads when closing the application
 # TODO: Update the dispatch stub generator so it only generates stubs that don't already exist
 #       and appends to the file rather than creating a new one.
 # TODO: Dispatch stub generator needs to add =None to optional params.
@@ -31,7 +30,7 @@ logging.getLogger("pywebview").setLevel(logging.CRITICAL + 1)
 #       be good to have for unit tests.  Change its name to return_type
 # TODO: In a perfect world before we save an entry we require:
 #       docstring longer than (or equal length) whatever our current shortest docstring is
-#       route to implementation  <- Implemented 
+#       route to implementation  <- Implemented
 #       implementing method exists in Dispatch  <- Currently checked when generating the dispatch dict.
 #       return type specified
 #       unit test exists/passes
@@ -80,23 +79,22 @@ class Command:
         self.description: str = ""
         self.deprecated_by: str = ""
         self.implemented_by: str = ""
-        self.return_value: str = ""
+        self.test_path: str = ""
+        self.return_type: str = ""
         self.html_doc: str = ""
         self.syntax: str = ""
 
     def from_dict(self, data: dict):
-        self.name = data["name"]
-        self.category = data["category"]
-        self.parameters = data["parameters"]
-        self.description = data["description"]
-        self.deprecated_by = data["deprecated_by"]
-        self.implemented_by = data["implemented_by"]
-        if "return_value" in data.keys():
-            self.return_value = data["return_value"]
-        else:
-            self.return_value = ""
-        self.html_doc = data["html_doc"]
-        self.syntax = data["syntax"]
+        self.name = data.get("name", "")
+        self.category = data.get("category", "")
+        self.parameters = data.get("parameters", [])
+        self.description = data.get("description", "")
+        self.deprecated_by = data.get("deprecated_by", "")
+        self.implemented_by = data.get("implemented_by", "")
+        self.test_path = data.get("test_path", "")
+        self.return_type = data.get("return_type", data.get("return_value", ""))
+        self.html_doc = data.get("html_doc", "")
+        self.syntax = data.get("syntax", "")
 
     def to_dict(self) -> dict:
         data = {
@@ -106,7 +104,8 @@ class Command:
             "description": self.description,
             "deprecated_by": self.deprecated_by,
             "implemented_by": self.implemented_by,
-            "return_value": self.return_value,
+            "test_path": self.test_path,
+            "return_type": self.return_type,
             "html_doc": self.html_doc,
             "syntax": self.syntax,
         }
@@ -129,7 +128,7 @@ class RegistryEditor:
         self.current_entry: Command | None = None
         self.file = os.path.join(os.path.dirname(__file__), "command_registry.json")
         self.html_header = get_html_header()
-        self.html_footer = """</body></html>"""
+        self.html_footer = "</body></html>"
         self._build_ui()
         self._refresh_listbox()
         self.name_entry.bind("<Tab>", self._copy_name_to_syntax, add="+")
@@ -137,6 +136,8 @@ class RegistryEditor:
         root.bind("<Return>", self._save_entry)
         root.bind("<Delete>", self._delete_command)
         self.status.set("Program initialized.")
+
+        self._is_loading = False
 
         # auto import our file
         if os.path.isfile(self.file):
@@ -147,10 +148,8 @@ class RegistryEditor:
 
     # Callbacks
 
-    def on_mouse_wheel(self, event):
-        scroll_units = -1 if event.delta > 0 else 1
-        self.canvas.yview_scroll(scroll_units, "units")
-        return "break"
+
+
 
     def _populate_syntax_for_command_filter(self, event=None):
         if (
@@ -163,13 +162,9 @@ class RegistryEditor:
 
     def _on_closing(self):
         if self.registry:
-            for k, v in self.registry.items():
-                if not v.implemented_by:
-                    if not v.deprecated_by:
-                        messagebox.showerror(f"Error: Entry {k} has no route to an implementation.")
-                        return
             self._export_json(self.file)
-            self.root.destroy()
+        self.root.destroy()
+        os._exit(0)
 
     def _copy_name_to_syntax(self, event=None):
         self.syntax.delete(0, tk.END)
@@ -313,13 +308,23 @@ class RegistryEditor:
         self.return_dropdown.grid(row=2, column=1, sticky="w", pady=2, columnspan=1, padx=5)
 
         # Implemented
-
         ttk.Label(self.editor_frame, text="Implemented by:", takefocus=0).grid(
             row=1, column=2, sticky="e", pady=2, padx=5
         )
         self.implemented_var = tk.StringVar()
         self.implemented_entry = ttk.Entry(self.editor_frame, textvariable=self.implemented_var, width=50)
         self.implemented_entry.grid(row=1, column=3, sticky="w", pady=2)
+
+        # Test Path
+        ttk.Label(self.editor_frame, text="Test Path:", takefocus=0).grid(row=2, column=2, sticky="e", pady=2, padx=5)
+        test_path_frame = ttk.Frame(self.editor_frame)
+        test_path_frame.grid(row=2, column=3, sticky="w", pady=2)
+        self.test_path_var = tk.StringVar()
+        self.test_path_entry = ttk.Entry(test_path_frame, textvariable=self.test_path_var, width=39)
+        self.test_path_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(test_path_frame, text="Browse", width=8, command=self._browse_test_path, takefocus=0).pack(
+            side=tk.LEFT, padx=(8, 0)
+        )
 
         # Parameters
         self.param_frame = ttk.LabelFrame(self.editor_frame, text="Parameters", takefocus=0)
@@ -360,27 +365,16 @@ class RegistryEditor:
         self.syntax_var.trace("w", lambda *args: self._update_preview())
 
         # Preview
-
-        scroll_container = ttk.Frame(self.editor_frame)
-        scroll_container.grid(row=6, column=0, sticky="nsew", pady=2, columnspan=4)
-        scroll_container.grid_rowconfigure(0, weight=1)
-        scroll_container.grid_columnconfigure(0, weight=1)
-        self.canvas = Canvas(scroll_container)
-        self.canvas.grid(row=0, column=0, sticky="nsew")
-        scrollbar = Scrollbar(self.editor_frame, orient="vertical", command=self.canvas.yview)
-        scrollbar.grid(row=6, column=4, sticky="ns")
-        self.canvas.configure(yscrollcommand=scrollbar.set)
-        self.canvas.grid_rowconfigure(0, weight=1)
-        self.canvas.grid_columnconfigure(0, weight=1)
-        scrollable_frame = ttk.Frame(self.canvas)
-        scrollable_frame.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
-        self.canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        self.canvas.bind("<MouseWheel>", self.on_mouse_wheel)
-        scrollable_frame.bind("<MouseWheel>", self.on_mouse_wheel)
-        self.preview_web = WebView2(scrollable_frame, takefocus=0, width=1366, height=768)
-        self.preview_web.pack(fill="both", expand=True, pady=(10, 2))
+        preview_container = ttk.Frame(self.editor_frame)
+        preview_container.grid(row=6, column=0, sticky="nsew", pady=2, columnspan=4)
+        preview_container.grid_rowconfigure(0, weight=1)
+        preview_container.grid_columnconfigure(0, weight=1)
+        
+        self.preview_web = WebView2(preview_container, takefocus=0, width=500, height=500)
+        self.preview_web.grid(row=0, column=0, sticky="nsew", pady=(10, 0))
+        
         bottom_frame = ttk.Frame(self.editor_frame, takefocus=0)
-        bottom_frame.grid(row=6, column=0, sticky="sew", pady=2, columnspan=4)
+        bottom_frame.grid(row=7, column=0, sticky="sew", pady=2, columnspan=4)
 
         # Export/import buttons
 
@@ -400,8 +394,111 @@ class RegistryEditor:
         self.editor_frame.columnconfigure(1, weight=1)
         self.editor_frame.columnconfigure(3, weight=1)
         self.editor_frame.rowconfigure(6, weight=1)
+        self.editor_frame.rowconfigure(7, weight=0)
 
     def _generate_dispatch(self):
+        dropped_commands = []
+        valid_registry = {}
+
+        filepath = os.path.join(os.path.dirname(__file__), "dispatch.py")
+        stubbed_methods = set()
+        if os.path.isfile(filepath):
+            with open(filepath, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+            current_method = None
+            for line in lines:
+                if line.strip().startswith("def "):
+                    current_method = line.split("def ")[1].split("(")[0].strip()
+                elif current_method and "pass" in line and "TODO" in line:
+                    stubbed_methods.add(current_method)
+
+        def resolves_to_implementation(cmd_name_full, visited=None):
+            cmd_name = cmd_name_full.split("(")[0].strip()
+            if visited is None:
+                visited = set()
+            if cmd_name in visited:
+                return False, "Circular deprecated_by reference"
+            visited.add(cmd_name)
+
+            if cmd_name not in self.registry:
+                return False, f"deprecated_by target '{cmd_name}' not found in registry"
+
+            entry = self.registry[cmd_name]
+            if entry.implemented_by:
+                try:
+                    if getattr(Dispatch, entry.implemented_by):
+                        return True, ""
+                except AttributeError:
+                    return False, f"Method {entry.implemented_by} not found in Dispatch"
+            elif entry.deprecated_by:
+                return resolves_to_implementation(entry.deprecated_by, visited)
+
+            return False, f"Command '{cmd_name}' has neither implemented_by nor deprecated_by"
+
+        for name, entry in self.registry.items():
+            if entry.deprecated_by:
+                valid, reason = resolves_to_implementation(entry.deprecated_by, {name})
+                if not valid:
+                    dropped_commands.append((name, f"Invalid deprecated_by route: {reason}"))
+                    continue
+            else:
+                # Check implementation
+                if not entry.implemented_by:
+                    dropped_commands.append((name, "No implementing_method or deprecated_by specified"))
+                    continue
+
+                if entry.implemented_by in stubbed_methods:
+                    dropped_commands.append((name, f"Method {entry.implemented_by} is an unfinished stub"))
+                    continue
+
+                try:
+                    if not getattr(Dispatch, entry.implemented_by):
+                        dropped_commands.append((name, f"Method {entry.implemented_by} not found in Dispatch"))
+                        continue
+                except AttributeError:
+                    dropped_commands.append((name, f"Method {entry.implemented_by} not found in Dispatch"))
+                    continue
+
+            # Check documentation
+            if not entry.description or len(entry.description.strip()) < 10:
+                dropped_commands.append((name, "Docstring too short (minimum 10 characters)"))
+                continue
+
+            # Check tests
+            if not entry.test_path:
+                dropped_commands.append((name, "No test path specified"))
+                continue
+
+            full_test_path = os.path.join(os.path.dirname(__file__), entry.test_path)
+            if not os.path.exists(full_test_path):
+                dropped_commands.append((name, f"Test path does not exist: {entry.test_path}"))
+                continue
+
+            if os.path.isdir(full_test_path):
+                has_py_file = any(
+                    f.endswith(".py")
+                    for f in os.listdir(full_test_path)
+                    if os.path.isfile(os.path.join(full_test_path, f))
+                )
+                if not has_py_file:
+                    dropped_commands.append((name, f"Test directory {entry.test_path} contains no .py files"))
+                    continue
+            elif not full_test_path.endswith(".py"):
+                dropped_commands.append((name, f"Test file {entry.test_path} must be a .py file"))
+                continue
+
+            valid_registry[name] = entry
+
+        if dropped_commands:
+            lines = [f"{name}: {reason}" for name, reason in dropped_commands]
+            msg = f"Dropped {len(dropped_commands)} commands due to missing requirements:\n\n"
+            msg += "\n".join(lines[:20])
+            if len(lines) > 20:
+                msg += f"\n...and {len(lines) - 20} more."
+            msg += "\n\nDo you want to continue generating the dispatch dict without these commands?"
+            if not messagebox.askyesno("Commands Dropped", msg):
+                return
+
         dispatch_dict = {
             name: {
                 "deprecated_by": entry.deprecated_by,
@@ -409,16 +506,13 @@ class RegistryEditor:
                 "category": entry.category,
                 "parameters": [{k: p.to_dict()[k] for k in ("type", "position", "optional")} for p in entry.parameters],
             }
-            for name, entry in self.registry.items()
+            for name, entry in sorted(valid_registry.items())
         }
+
         for v in dispatch_dict.values():
             if v["implemented_by"] != "":
-                if not getattr(Dispatch, v["implemented_by"]):
-                    messagebox.showerror(f"No implementing method for {v["implemented_by"]} in Dispatch!")
-                    return
-        for v in dispatch_dict.values():
-            if v["implemented_by"] != "":
-                v["implemented_by"] = f"Dispatch.{v["implemented_by"]}"
+                v["implemented_by"] = f"Dispatch.{v['implemented_by']}"
+
         with open("dispatch_dict.py", "w", encoding="utf-8") as f:
             f.write("DISPATCH_DICT = {\n")
             for k, v in dispatch_dict.items():
@@ -431,7 +525,7 @@ class RegistryEditor:
         with open("dispatch_dict.py", "w", encoding="utf-8") as f:
             for line in lines:
                 f.write(line)
-            messagebox.showinfo("Generated", "Saved to dispatch_dict.py")
+        messagebox.showinfo("Generated", "Saved to dispatch_dict.py")
 
     def _generate_docs(self):
         self.status.set("Building docs...")
@@ -447,13 +541,19 @@ class RegistryEditor:
             messagebox.showinfo("Generated", "Saved to docs.html")
 
     def _update_preview(self):
-        html = self.html_header
-        html += f"""{self.generate_html_doc(self.name_var.get().strip())}"""
-        html += self.html_footer
+        if getattr(self, "_is_loading", False):
+            return
 
-        self.preview_web.load_html(html)
-        self.preview_web.update()  # Force the webview to repaint
-        self.root.update_idletasks()
+        try:
+            html = self.html_header
+            html += f"""{self.generate_html_doc(self.name_var.get().strip())}"""
+            html += self.html_footer
+
+            self.preview_web.load_html(html)
+            self.preview_web.update()  # Force the webview to repaint
+            self.root.update_idletasks()
+        except Exception:
+            pass
 
     def _add_parameter(self):
         self.param_rows += 1
@@ -473,10 +573,15 @@ class RegistryEditor:
         desc_entry = tk.Entry(self.param_inputs_frame, textvariable=desc_var, width=30)
         desc_entry.grid(row=self.param_rows, column=3, padx=(5, 0), sticky="ew")
 
-        remove_btn = ttk.Button(
-            self.param_inputs_frame, text="X", width=2, command=lambda r=self.param_rows: self._remove_parameter_row(r)
-        )
+        remove_btn = ttk.Button(self.param_inputs_frame, text="X", width=2)
         remove_btn.grid(row=self.param_rows, column=4, padx=5, sticky="e")
+        remove_btn.config(command=lambda btn=remove_btn: self._remove_parameter_row(btn.grid_info()["row"]))
+
+        # Add traces for live HTML preview
+        type_var.trace("w", lambda *args: self._update_preview())
+        optional_var.trace("w", lambda *args: self._update_preview())
+        desc_var.trace("w", lambda *args: self._update_preview())
+        position_var.trace("w", lambda *args: self._update_preview())
 
         self.param_entries.append(
             (
@@ -555,8 +660,12 @@ class RegistryEditor:
         self._update_ui_from_entry()
 
     def _update_ui_from_entry(self):
-        while self.param_entries:
-            self._remove_parameter_row(1)
+        self._is_loading = True
+
+        for widget in self.param_inputs_frame.winfo_children():
+            widget.destroy()
+        self.param_entries = []
+        self.param_rows = 0
 
         self._populate_or_disable_return()
 
@@ -576,10 +685,32 @@ class RegistryEditor:
         if self.category_var.get() == "Command":
             self.return_var.set("")
         else:
-            self.return_var.set(self.current_entry.return_value)
+            self.return_var.set(self.current_entry.return_type)
         self.docstring_var.set(self.current_entry.description)
         self.syntax_var.set(self.current_entry.syntax)
         self.implemented_var.set(self.current_entry.implemented_by)
+        self.test_path_var.set(self.current_entry.test_path)
+
+        self._is_loading = False
+        self._update_preview()
+
+    def _browse_test_path(self):
+        path = filedialog.askopenfilename(
+            title="Select Test Script",
+            filetypes=[("Python Files", "*.py")],
+            initialdir=os.path.join(os.path.dirname(__file__), "tests", "commands"),
+        )
+        if not path:
+            path = filedialog.askdirectory(
+                title="Select Test Folder", initialdir=os.path.join(os.path.dirname(__file__), "tests", "commands")
+            )
+        if path:
+            try:
+                # Try to store a relative path to keep the registry portable
+                rel_path = os.path.relpath(path, os.path.dirname(__file__))
+                self.test_path_var.set(rel_path)
+            except ValueError:
+                self.test_path_var.set(path)
 
     def _new_command(self):
         self.current_entry = Command()
@@ -612,7 +743,10 @@ class RegistryEditor:
         # Collect parameters from UI **first**
         new_params = []
         for row in self.param_entries:
-            pos = row[6].get()
+            try:
+                pos = row[6].get()
+            except tk.TclError:
+                pos = 0
             type = row[7].get()
             optional = row[8].get()
             desc = row[9].get()
@@ -628,7 +762,8 @@ class RegistryEditor:
         self.current_entry.syntax = self.syntax_var.get().strip()
         self.current_entry.deprecated_by = self.deprecated_var.get().strip()
         self.current_entry.implemented_by = self.implemented_var.get().strip()
-        self.current_entry.return_value = self.return_var.get()
+        self.current_entry.test_path = self.test_path_var.get().strip()
+        self.current_entry.return_type = self.return_var.get()
         self.current_entry.parameters = new_params  # ← assign the collected objects
         self.current_entry.html_doc = self.generate_html_doc(name)
 
@@ -671,9 +806,10 @@ class RegistryEditor:
                 )
             # now handle multiple params in same pos
             else:
-                for j, param in enumerate(param_pos):
-                    param_str += f'<span class="param_name" title="{param.description}">{param.type}</span>'
-                    param_str += '<span class="param_desc"> or </span>' if j <= len(params_by_pos) - 1 else ""
+                types_html = []
+                for param in param_pos:
+                    types_html.append(f'<span class="param_name" title="{param.description}">{param.type}</span>')
+                param_str += '<span class="param_desc"> or </span>'.join(types_html)
             param_str += ", " if i < len(params_by_pos) - 1 else ""
         html += param_str
         if len(params) > 0:
@@ -681,16 +817,22 @@ class RegistryEditor:
             html += "<br>"
         html += "</span>"
         # Params list
-        for param_pos in params_by_pos:
-            for i, param in enumerate(param_pos):
-                if i == 0:
-                    html += f"""<span class="list_param_pos">Position: {param.position + 1} </span>"""
-                else:
-                    html += """<span class="list_param_pos">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>"""
-                html += f"""<span class="list_param_name">{param.type}</span> """
-                if param.optional:
-                    html += """ <span class="param_parens">(</span><span class="param_desc">optional</span><span class="param_parens">)</span> """
-                html += f"""<span class="param_desc"> - {param.description}</span>{"<br>" if params.index(param) < len(params) - 1 else ""}"""
+        if len(params) > 0:
+            html += """<table class="param_table">"""
+            for param_pos in params_by_pos:
+                for i, param in enumerate(param_pos):
+                    html += "<tr>"
+                    if i == 0:
+                        html += f"""<td class="list_param_pos" style="vertical-align: top;">Position: {param.position + 1} </td>"""
+                    else:
+                        html += """<td class="list_param_pos"></td>"""
+                    html += f"""<td class="list_param_name" style="vertical-align: top; white-space: nowrap;">{param.type} """
+                    if param.optional:
+                        html += """ <span class="param_parens">(</span><span class="param_desc">optional</span><span class="param_parens">)</span> """
+                    html += """</td>"""
+                    html += f"""<td class="param_desc" style="vertical-align: top;"> - {param.description}</td>"""
+                    html += "</tr>"
+            html += """</table>"""
 
         # Syntax Examples
         html += f"""<br><code class="syntax">{syntax}</code>"""
@@ -713,7 +855,10 @@ class RegistryEditor:
 
         params = []
         for row in self.param_entries:
-            pos = row[6].get()
+            try:
+                pos = row[6].get()
+            except tk.TclError:
+                pos = 0
             type = row[7].get()
             optional = row[8].get()
             desc = row[9].get()
@@ -765,6 +910,8 @@ class RegistryEditor:
         return text
 
     def _delete_command(self, event=None):
+        if event is not None and self.root.focus_get() != self.cmd_listbox:
+            return
         if not self.current_entry or not self.current_entry.name:
             return
         key = self.current_entry.name
@@ -823,38 +970,111 @@ class RegistryEditor:
         data = {
             "version": "1.0.0",
             "generated": datetime.now().isoformat(),
-            "commands": {k: v.to_dict() for k, v in self.registry.items()},
+            "commands": {k: self.registry[k].to_dict() for k in sorted(self.registry.keys())},
         }
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
         messagebox.showinfo("Exported", f"Saved to {path}")
 
     def generate_dispatch_class_stub(self):
-        with open("dispatch_stub.py", "w", encoding="utf-8") as f:
-            f.write("from dispatch import validate_params\n")
-            f.write("class Dispatch:\n\n")
-            f.write("    @staticmethod\n")
-            f.write("    def NOP(*args):\n")
-            f.write("        pass\n")
-            implementations = set()
-            for key in self.registry.keys():
-                if self.registry[key].implemented_by != "":
-                    implementations.add(self.registry[key].implemented_by)
-            implementations.remove("NOP")
-            for key in sorted(implementations):
-                if "@" + key in self.registry.keys() and self.registry["@" + key].implemented_by != "":
-                    key = "@" + key
-                elif self.registry["#" + key].implemented_by != "":
-                    key = "#" + key
-                f.write("\n")
-                f.write("    @validate_params\n")
-                f.write("    @staticmethod\n")
-                f.write(f"    def {self.registry[key].implemented_by}(")
-                if len(self.registry[key].parameters) > 0:
-                    for i, param in enumerate(self.registry[key].parameters):
-                        f.write(f"arg{i}{',' if len(self.registry[key].parameters) > i + 1 else ''}")
-                f.write("):\n")
-                f.write("        pass\n\n")
+        import ast
+
+        filepath = os.path.join(os.path.dirname(__file__), "dispatch.py")
+        if not os.path.isfile(filepath):
+            messagebox.showerror("Error", "Could not find dispatch.py")
+            return
+
+        with open(filepath, "r", encoding="utf-8") as f:
+            source = f.read()
+
+        try:
+            tree = ast.parse(source)
+        except Exception as e:
+            messagebox.showerror("Parse Error", f"Failed to parse dispatch.py: {e}")
+            return
+
+        method_lines = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef) and node.name == "Dispatch":
+                for item in node.body:
+                    if isinstance(item, ast.FunctionDef):
+                        first_line = item.lineno
+                        if item.decorator_list:
+                            first_line = item.decorator_list[0].lineno
+                        method_lines[item.name] = first_line - 1
+                break
+
+        missing_impls = {}
+        for cmd in self.registry.values():
+            if cmd.implemented_by and cmd.implemented_by not in method_lines:
+                missing_impls[cmd.implemented_by] = cmd
+
+        if not missing_impls:
+            messagebox.showinfo("Done", "No missing methods to stub!")
+            return
+
+        with open(filepath, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+
+        class_start = -1
+        for i, line in enumerate(lines):
+            if line.startswith("class Dispatch"):
+                class_start = i
+                break
+
+        if class_start == -1:
+            messagebox.showerror("Error", "Could not locate 'class Dispatch' in dispatch.py")
+            return
+
+        methods_in_file = sorted(method_lines.keys(), key=lambda x: x.lower())
+        inserts_needed = sorted(missing_impls.keys(), key=lambda x: x.lower())
+
+        insertion_points = {i: [] for i in range(len(lines) + 1)}
+
+        for impl_name in inserts_needed:
+            cmd = missing_impls[impl_name]
+
+            insert_before_method = None
+            for m in methods_in_file:
+                if m.lower() > impl_name.lower():
+                    insert_before_method = m
+                    break
+
+            if insert_before_method:
+                insert_idx = method_lines[insert_before_method]
+            else:
+                insert_idx = len(lines)
+
+            stub = "\n    @validate_params\n    @staticmethod\n"
+            stub += f"    def {impl_name}("
+
+            sig_args = []
+            for i, p in enumerate(cmd.parameters):
+                if p.optional:
+                    sig_args.append(f"arg{i}=None")
+                else:
+                    sig_args.append(f"arg{i}")
+
+            stub += ", ".join(sig_args)
+            stub += "):\n        pass  # TODO\n"
+
+            insertion_points[insert_idx].append(stub)
+
+        new_source = []
+        for i, line in enumerate(lines):
+            if i in insertion_points:
+                for stub in insertion_points[i]:
+                    new_source.append(stub)
+            new_source.append(line)
+
+        if len(lines) in insertion_points:
+            for stub in insertion_points[len(lines)]:
+                new_source.append(stub)
+
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.writelines(new_source)
+
+        messagebox.showinfo("Generated", f"Successfully injected {len(inserts_needed)} stubs into dispatch.py")
 
 
 class StatusBar(tk.Frame):

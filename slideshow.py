@@ -27,6 +27,7 @@ class Slideshow:
         self.index = 0
         self.live = False
         Bus.sub("end_tease", self._on_end_tease)
+        Bus.register("get_current_slide_path", self._on_get_current_slide_path)
         Bus.register("pause_slideshow", self._on_pause_slideshow)
         Bus.register("unpause_slideshow", self._on_start_slideshow)
         Bus.register("start_slideshow", self._on_start_slideshow)
@@ -40,8 +41,11 @@ class Slideshow:
         Bus.register("dont_advance", lambda: setattr(self, "_dont_advance", True))
         Bus.sub("show_image", lambda img: setattr(self, "current_image", img))
 
-    def _on_new_message(self, sender, message):
-        if sender != "You" and not self._dont_advance:
+    def _on_get_current_slide_path(self, response_dict):
+        response_dict["path"] = self.slides[self.index]
+
+    def _on_new_message(self, message):
+        if message.sender != "You" and not self._dont_advance:
             return self.advance()
         self._dont_advance = False
 

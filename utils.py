@@ -2,6 +2,10 @@ from datetime import datetime
 import os
 import random
 import re
+from collections import namedtuple
+
+from tai_exceptions import SyntaxErr
+from bus import Bus
 
 
 def is_valid_filename(filename):
@@ -68,3 +72,27 @@ def random_video(dir):
     if os.path.isdir(dir):
         files = [file for file in os.listdir(dir) if is_video_file(file)]
         return os.path.join(dir, random.choice(files))
+
+
+def add_time(which, arg1=None, arg2=None):
+    seconds = 0
+    if arg1 is not None:
+        seconds = convert_string_time_to_seconds(arg1.Evaluate())
+        if seconds == "invalid units":
+            return SyntaxErr("Invalid time units", *arg1.get_position()).throw()
+    if arg2 is not None:
+        arg2seconds = convert_string_time_to_seconds(arg2.Evaluate())
+        if arg2seconds == "invalid units":
+            return SyntaxErr("Invalid time units", *arg2.get_position()).throw()
+        seconds = random.randint(seconds, arg2seconds)
+    Bus.emit(which, seconds)
+
+
+def get_settings():
+    Bus.emit("get_settings", settings := namedtuple("FetchDict", "settings"))
+    return settings.settings
+
+
+def get_runtime():
+    Bus.emit("get_runtime", runtime := namedtuple("FetchDict", "runtime"))
+    return runtime.runtime

@@ -1,319 +1,544 @@
-from kivy import Config
-
-Config.set("kivy", "kivy_clock", "interrupt")
-
-import ctypes
-import threading
 import os
-
-import pystray
-
-from kivy.core.window import Window
-from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.relativelayout import RelativeLayout
-from kivy.uix.image import Image
-from kivymd.app import Clock, MDApp
-from kivymd.uix.button import MDButton, MDButtonText
-from kivymd.uix.boxlayout import MDBoxLayout
-from kivymd.uix.navigationdrawer import MDNavigationDrawer
-from kivymd.uix.screen import MDScreen
-from kivymd.uix.textfield import MDTextField, MDTextFieldHintText
-from PIL import Image as PILImage
-from kivy.uix.scrollview import ScrollView
-from kivy.metrics import dp
-from kivy.modules import inspector
-from kivymd.uix.label import MDLabel
-from kivy.uix.widget import Widget
+from settings import APPLICATION_ROOT
+import sys
+from PySide6.QtWidgets import (
+    QApplication,
+    QMainWindow,
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QPushButton,
+    QLabel,
+    QSystemTrayIcon,
+    QMenu,
+    QStackedWidget,
+)
+from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QPoint, QTimer
+from PySide6.QtGui import QIcon, QAction, QFontDatabase, QCursor
 
 from bus import Bus
+
 from media_player_widget import MediaPlayerWidget
-from message_classes import DommeMessage, UserMessage
-from img_tags import ImageTagger, TAI_MDButton
-from draggable_title_bar import DraggableTitleBar
-from settings_ui import Settings_UI
+from chat import ChatOverlay
+from img_tags import ImageTagger
+from settings_ui import SettingsWindow
+from metronome import Metronome
 
-APPLICATION_ROOT = os.path.dirname(os.path.abspath(__file__))
-
-
-class MyDrawer(MDNavigationDrawer):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.width = 150
-        self.duration_open = 0.2
-        self.duration_close = 0.2
-        self.easing = "in_out_cubic"
-
-    def set_state(self, new_state="toggle", animation=True):
-        super().set_state(new_state, animation)
-        if self.state == "open" or self.status in ("opening_with_animation", "opening_with_swipe"):
-            self.width = 150
-            self._update_drawer_width()
-
-    def _update_drawer_width(self):
-        self.width = 150
+from theme import THEME
 
 
-user32 = ctypes.windll.user32
-gdi32 = ctypes.windll.gdi32
+# Global Font Loading Helper
+def load_application_fonts():
+    font_path = os.path.join("ui_resources", "Nasalization.ttf")
+    if os.path.exists(font_path):
+        res = QFontDatabase.addApplicationFont(font_path)
+        if res == -1:
+            print(f"Warning: Failed to load font: {font_path}")
+    else:
+        print(f"Warning: Font file not found: {font_path}")
 
 
-class MainScreen(MDScreen):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.hwnd = user32.GetForegroundWindow()
-        self.layout = RelativeLayout()
-        title = DraggableTitleBar()
-        self.layout.add_widget(title)
-        self.drawer = MyDrawer(radius=[0, 24, 24, 0], pos_hint={"left": 0}, state="close", width=150)
-        drawer_content = BoxLayout(orientation="vertical", size_hint=(1, None))
-        self.select_personality = MDButton(
-            MDButtonText(text="Select Personality"), style="text", size_hint_x=1, pos_hint={"center_x": 0.5}
+# THEME is now imported from theme.py
+
+
+GLOBAL_QSS = rf"""
+QMainWindow {{ background-color: {THEME["black"]}; margin: 0px; padding: 0px;}}
+QWidget#CentralWidget {{ background-color: {THEME["black"]}; }}
+QWidget#TitleBar {{ background-color: {THEME["ui_primary"]}; }}
+
+/* Buttons */
+
+QPushButton {{ 
+    background-color: {THEME["ui_secondary"]}; 
+    color: {THEME["ui_text"]}; 
+    border: 1px solid {THEME["ui_secondary_hover"]}; 
+    padding: 10px 15px; 
+    border-radius: 6px; 
+    font-size: 14px;
+    font-weight: 500;
+}}
+
+/* TitleBar Buttons - Override Defaults (Flat, no border/radius) */
+QPushButton#min_btn, 
+QPushButton#max_btn, 
+QPushButton#restore_btn, 
+QPushButton#close_btn,
+QPushButton#menu_btn,
+QPushButton#min_btn:hover,
+QPushButton#max_btn:hover,
+QPushButton#restore_btn:hover,
+QPushButton#close_btn:hover,
+QPushButton#menu_btn:hover,
+QPushButton#min_btn:pressed,
+QPushButton#max_btn:pressed,
+QPushButton#restore_btn:pressed,
+QPushButton#close_btn:pressed,
+QPushButton#menu_btn:pressed {{
+    border: none;
+    border-radius: 0px;
+    padding: 0px;
+}}
+QPushButton#menu_btn {{ 
+    background-image: url(ui_resources/hamburger.png);
+}}
+QPushButton#menu_btn:hover {{
+    background-image: url(ui_resources/hamburger_hover.png);
+}}
+QPushButton#min_btn {{ 
+    background-image: url(ui_resources/minimize_qt.png);
+}} 
+QPushButton#min_btn:hover {{ 
+    background-image: url(ui_resources/minimize_qt_hover.png);
+}}
+QPushButton#close_btn {{ 
+    background-image: url(ui_resources/close_qt.png);
+}} 
+QPushButton#close_btn:hover {{ 
+    background-image: url(ui_resources/close_qt_hover.png);
+}}
+QPushButton:hover {{ 
+    background-color: {THEME["ui_secondary_hover"]}; 
+}}
+
+/* ScrollBars */
+QScrollBar:vertical {{
+    border: none;
+    background: {THEME["hero_shadow"]};
+    width: 8px;
+    margin: 0px;
+}}
+QScrollBar::handle:vertical {{
+    background: {THEME["ui_secondary"]};
+    min-height: 20px;
+    border-radius: 4px;
+}}
+QScrollBar::handle:vertical:hover {{
+    background: {THEME["ui_secondary_hover"]};
+}}
+
+/* Drawer Buttons - Specialized */
+#DrawerButton {{
+    text-align: left;
+    padding-left: 20px;
+    background: transparent;
+    border: none;
+    border-radius: 0px;
+    height: 45px;
+    color: {THEME["ui_text"]};
+}}
+#DrawerButton:hover {{
+    background-color: {THEME["ui_secondary_hover"]};
+    color: {THEME["highlighted"]};
+}}
+
+/* Personality Flyout Menu */
+QMenu#PersonalityMenu {{
+    background-color: {THEME["ui_secondary"]};
+    border: 1px solid {THEME["ui_secondary_border"]};
+    border-radius: 6px;
+    padding: 4px 0px;
+    color: {THEME["ui_text"]};
+    font-size: 13px;
+}}
+QMenu#PersonalityMenu::item {{
+    padding: 8px 20px 8px 14px;
+    border-radius: 4px;
+    margin: 2px 4px;
+}}
+QMenu#PersonalityMenu::item:selected {{
+    background-color: {THEME["ui_secondary_hover"]};
+    color: {THEME["highlighted"]};
+}}
+QMenu#PersonalityMenu::item:pressed {{
+    background-color: {THEME["highlighted_shadow"]};
+    color: {THEME["highlighted"]};
+}}
+
+QLabel {{ color: {THEME["ui_text"]}; }}
+"""
+
+
+class PersonalityFlyoutButton(QPushButton):
+    """A drawer button that shows a hover-activated flyout listing Scripts/ subdirectories."""
+
+    def __init__(self, parent=None):
+        super().__init__("Select Personality  \u25b6", parent)
+        self.setObjectName("DrawerButton")
+        self._active_menu = None
+
+        # Delay before showing the flyout on hover
+        self._show_timer = QTimer(self)
+        self._show_timer.setSingleShot(True)
+        self._show_timer.setInterval(150)
+        self._show_timer.timeout.connect(self._show_flyout)
+
+        # Polls cursor position while the flyout is open.
+        # Avoids relying on leaveEvent/enterEvent which are unreliable
+        # when a QMenu popup is grabbing input focus.
+        self._poll_timer = QTimer(self)
+        self._poll_timer.setInterval(80)
+        self._poll_timer.timeout.connect(self._poll_hover)
+
+    def _get_personalities(self):
+        scripts_dir = os.path.join(APPLICATION_ROOT, "Scripts")
+        if not os.path.isdir(scripts_dir):
+            return []
+        return sorted(
+            entry.name
+            for entry in os.scandir(scripts_dir)
+            if entry.is_dir()
         )
-        self.select_personality.bind(on_release=self.on_select_personality)
-        drawer_content.add_widget(self.select_personality)
-        start = MDButton(MDButtonText(text="Start"), style="text", size_hint_x=1, pos_hint={"center_x": 0.5})
-        start.bind(on_release=lambda *args: Bus.emit("start"))
-        drawer_content.add_widget(start)
-        tag_images = MDButton(MDButtonText(text="Tag Images"), style="text", size_hint_x=1, pos_hint={"center_x": 0.5})
-        self.tagger = ImageTagger(size_hint=(None, None), size=(1000, 774))
-        tag_images.bind(on_release=lambda *args: Window.add_widget(self.tagger))
-        drawer_content.add_widget(tag_images)
-        self.setting_ui = Settings_UI(size_hint=(None, None), size=(1000, 774))
-        settings_button = MDButton(
-            MDButtonText(text="Settings"), style="text", size_hint_x=1, pos_hint={"center_x": 0.5}
+
+    def enterEvent(self, event):
+        # Only start the show timer when no menu is currently open
+        if self._active_menu is None:
+            self._show_timer.start()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        # Cancel pending show; actual close is handled by the poll timer
+        self._show_timer.stop()
+        super().leaveEvent(event)
+
+    def _poll_hover(self):
+        """Close the flyout if the cursor has left both the button and the menu."""
+        cursor_pos = QCursor.pos()
+        over_button = self.rect().contains(self.mapFromGlobal(cursor_pos))
+        over_menu = (
+            self._active_menu is not None
+            and self._active_menu.isVisible()
+            and self._active_menu.rect().contains(
+                self._active_menu.mapFromGlobal(cursor_pos)
+            )
         )
-        settings_button.bind(on_release=lambda *args: Window.add_widget(self.settings_ui))
-        drawer_content.add_widget(settings_button)
+        if not over_button and not over_menu:
+            self._close_menu()
 
-        self.drawer.add_widget(drawer_content)
-        self.layout.add_widget(self.drawer)
-        self.drawer_handle = Image(
-            source="ui_resources\\handle.png",
-            size_hint=(None, None),
-            size=(28, 64),
-            pos_hint={"center_y": 0.5},
-            opacity=0.7,
+    def _close_menu(self):
+        self._poll_timer.stop()
+        if self._active_menu is not None:
+            self._active_menu.close()
+            self._active_menu = None
+
+    def _show_flyout(self):
+        if self._active_menu is not None:
+            return
+
+        personalities = self._get_personalities()
+        if not personalities:
+            return
+
+        # Get the currently active personality for the checkmark
+        d = {}
+        Bus.emit("get_current_personality", d)
+        current = d.get("personality", "")
+
+        menu = QMenu(self)
+        menu.setObjectName("PersonalityMenu")
+        menu.setStyleSheet(self.window().styleSheet())
+
+        for name in personalities:
+            action = QAction(name, menu)
+            action.setCheckable(True)
+            action.setChecked(name == current)
+            action.triggered.connect(lambda checked=False, n=name: self._select_personality(n))
+            menu.addAction(action)
+
+        # Clean up when the menu closes for any reason (click-outside, Escape, etc.)
+        menu.aboutToHide.connect(self._on_menu_hidden)
+        self._active_menu = menu
+
+        # Position flush to the right edge of the NavDrawer at this button's Y
+        drawer = self.parent()
+        global_pos = drawer.mapToGlobal(QPoint(drawer.width(), self.y()))
+        menu.popup(global_pos)
+
+        # Start polling — leaveEvent is unreliable after popup() grabs input
+        self._poll_timer.start()
+
+    def _on_menu_hidden(self):
+        """Called when the menu closes for any reason — cleans up state."""
+        self._poll_timer.stop()
+        self._active_menu = None
+        # Defer the hover-state clear: the popup close event can itself
+        # interfere with Windows hover tracking, leaving the button stuck.
+        # Waiting 60ms lets Qt settle before we force a re-evaluation.
+        QTimer.singleShot(60, self._clear_stale_hover)
+
+    def _clear_stale_hover(self):
+        """Force-clear the :hover state if the cursor is no longer over this button."""
+        if not self.rect().contains(self.mapFromGlobal(QCursor.pos())):
+            self.style().unpolish(self)
+            self.style().polish(self)
+            self.update()
+
+    def _select_personality(self, name):
+        Bus.emit("set_personality", name)
+        self._close_menu()
+        drawer = self.parent()
+        if hasattr(drawer, "close_drawer"):
+            drawer.close_drawer()
+
+
+class NavDrawer(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("NavDrawer")
+        self.setFixedWidth(0)
+        self.setAttribute(Qt.WA_StyledBackground)
+        self.setStyleSheet(
+            f"#NavDrawer {{ background-color: {THEME['ui_secondary']}; border-right: 1px solid {THEME['ui_secondary_hover']}; }}"
         )
-        self.layout.add_widget(self.drawer_handle)
-        self.media_player = MediaPlayerWidget(
-            pos_hint={"center_y": 0.5, "right": 0.65},
-            size_hint=(None, None),
-            size=(self.layout.width * 0.6, self.layout.height * 0.8),
-        )
-        self.layout.add_widget(self.media_player)
 
-        self.chat_overlay = MDBoxLayout(
-            orientation="vertical",
-            padding=16,
-            spacing=8,
-            size_hint=(0.3, 0.9),
-            pos_hint={"center_y": 0.5, "right": 0.98},
-            radius=[24, 24, 24, 24],
-            md_bg_color=(0.12, 0.12, 0.15),
-        )
-        self.chat_scroll = ScrollView(
-            do_scroll_x=False,
-            bar_width=dp(4),
-            bar_color=(0.5, 0.5, 0.5, 0.5),
-            bar_inactive_color=(0.5, 0.5, 0.5, 0.3),
-            effect_cls="ScrollEffect",
-        )
-        self.chat_messages = BoxLayout(
-            orientation="vertical", size_hint_y=None, spacing=dp(12), padding=[0, dp(8), 0, dp(8)]
-        )
-        self.chat_messages.bind(minimum_height=self.chat_messages.setter("height"))
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(0, 0, 0, 0)
+        self.layout.setSpacing(0)
 
-        self.chat_spacer = Widget(size_hint_y=None, height=0)
-        self.chat_messages.add_widget(self.chat_spacer)
+        # Drawer Content (Buttons)
+        btn_personality = PersonalityFlyoutButton(self)
 
-        def update_spacer(*args):
-            content_h = sum(c.height for c in self.chat_messages.children if c != self.chat_spacer)
-            content_h += len(self.chat_messages.children) * dp(12)
-            new_h = max(0, self.chat_scroll.height - content_h)
-            self.chat_spacer.height = new_h
+        btn_start = QPushButton("Start Session")
+        btn_start.clicked.connect(lambda: Bus.emit("start"))
 
-        self.chat_scroll.bind(height=update_spacer)
-        self.chat_messages.bind(minimum_height=update_spacer)
+        btn_tagger = QPushButton("Image Tagger")
+        btn_tagger.clicked.connect(lambda: Bus.emit("open_tagger"))
 
-        self.chat_scroll.add_widget(self.chat_messages)
-        self.chat_overlay.add_widget(self.chat_scroll)
+        btn_settings = QPushButton("User Settings")
+        btn_settings.clicked.connect(lambda: Bus.emit("open_settings"))
 
-        self.input_field = MDTextField(
-            MDTextFieldHintText(text="Type a message"),
-            mode="outlined",
-            multiline=False,
-            size_hint_y=None,
-            height=60,
-            radius=[20, 20, 20, 20],
-        )
-        self.input_field.bind(on_text_validate=self.send_user_message)
-        self.chat_overlay.add_widget(self.input_field)
-        self.layout.add_widget(self.chat_overlay)
-        self.input_field.focus = True
-        Window.bind(mouse_pos=self._on_mouse_pos)
-        self.add_widget(self.layout)
+        # Re-using the DrawerContent styles from QSS
+        for btn in [btn_personality, btn_start, btn_tagger, btn_settings]:
+            btn.setObjectName("DrawerButton")
+            self.layout.addWidget(btn)
 
-        def update_layout(*args):
-            self.media_player.width = self.layout.width * 0.68 - (self.layout.width * 0.05 + self.drawer_handle.width)
-            self.media_player.height = self.layout.height * 0.8
+        self.layout.addStretch()
 
-        self.layout.bind(width=update_layout)
-        self.layout.bind(height=update_layout)
+        # Animation
+        self.animation = QPropertyAnimation(self, b"minimumWidth")
+        self.animation.setDuration(300)
+        self.animation.setEasingCurve(QEasingCurve.OutQuint)
 
-        def sync_handle_position(*args):
-            initial = self.drawer_handle.right
-            self.drawer_handle.x = self.drawer.x + self.drawer.width
-            delta = self.drawer_handle.right - initial
-            self.media_player.x += delta
-            self.media_player.width -= delta
+        self.animation_max = QPropertyAnimation(self, b"maximumWidth")
+        self.animation_max.setDuration(300)
+        self.animation_max.setEasingCurve(QEasingCurve.OutQuint)
 
-        self.drawer.bind(
-            x=sync_handle_position,
-            width=sync_handle_position,
-            open_progress=sync_handle_position,
-            state=sync_handle_position,
-            status=sync_handle_position,
-        )
+    def open_drawer(self):
+        Bus.emit("pause_session")
+        self.animation.setStartValue(self.width())
+        self.animation.setEndValue(175)
+        self.animation_max.setStartValue(self.width())
+        self.animation_max.setEndValue(175)
+        self.animation.start()
+        self.animation_max.start()
+
+    def close_drawer(self):
+        self.animation.setStartValue(self.width())
+        self.animation.setEndValue(0)
+        self.animation_max.setStartValue(self.width())
+        self.animation_max.setEndValue(0)
+        self.animation.start()
+        self.animation_max.start()
+        Bus.emit("resume_session")
+
+    def toggle(self):
+        if self.width() < 10:
+            self.open_drawer()
+        else:
+            self.close_drawer()
+
+
+class TitleBar(QWidget):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.parent = parent
+        self.setObjectName("TitleBar")
+        self.setAttribute(Qt.WA_StyledBackground)
+        self.layout = QHBoxLayout(self)
+        self.setFixedHeight(43)
+        self.layout.setContentsMargins(0, 0, 0, 0)
+        self.layout.setSpacing(0)
+
+        self.menu_btn = QPushButton()
+        self.menu_btn.setObjectName("menu_btn")
+        self.menu_btn.setFixedSize(43, 43)
+        self.menu_btn.clicked.connect(self.parent.drawer.toggle)
+        self.layout.addWidget(self.menu_btn)
+
+        self.title = QLabel("TeaseAI")
+        self.title.setStyleSheet("font-family: Nasalization; font-weight: bold; color: #d7d8d7; font-size: 15px;")
+        self.layout.addStretch()
+        self.layout.addWidget(self.title)
+        self.layout.addStretch()
+
+        self.min_btn = QPushButton()
+        self.min_btn.setObjectName("min_btn")
+        self.min_btn.setFixedSize(43, 43)
+        self.min_btn.clicked.connect(self.parent.showMinimized)
+
+        self.max_style = "QPushButton#max_btn { background-image: url(ui_resources/maximize_qt.png);} QPushButton#max_btn:hover { background-image: url(ui_resources/maximize_qt_hover.png);}"
+        self.restore_style = "QPushButton#max_btn { background-image: url(ui_resources/restore_qt.png);} QPushButton#max_btn:hover { background-image: url(ui_resources/restore_qt_hover.png);}"
+        self.max_btn = QPushButton()
+        self.max_btn.setObjectName("max_btn")
+        self.max_btn.setStyleSheet(self.restore_style if self.parent.isMaximized() else self.max_style)
+        self.max_btn.setFixedSize(43, 43)
+        self.max_btn.clicked.connect(self.on_maximize_press)
+
+        self.close_btn = QPushButton()
+        self.close_btn.setObjectName("close_btn")
+        self.close_btn.setFixedSize(43, 43)
+        self.close_btn.clicked.connect(self.parent.close)
+
+        self.layout.addWidget(self.min_btn)
+        self.layout.addWidget(self.max_btn)
+        self.layout.addWidget(self.close_btn)
+
+        self.start_pos = None
+
+    def on_maximize_press(self, event):
+        if self.parent.isMaximized():
+            self.parent.showNormal()
+            self.max_btn.setStyleSheet(self.max_style)
+        else:
+            self.parent.showMaximized()
+            self.max_btn.setStyleSheet(self.restore_style)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.start_pos = event.globalPosition().toPoint()
+
+    def mouseMoveEvent(self, event):
+        if self.start_pos:
+            delta = event.globalPosition().toPoint() - self.start_pos
+            self.parent.move(self.parent.pos() + delta)
+            self.start_pos = event.globalPosition().toPoint()
+
+
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        # Ensure fonts are loaded before styling
+        load_application_fonts()
+
+        self.setWindowFlags(Qt.FramelessWindowHint)
+
+        # Sizing relative to screen (accounting for OS scaling)
+        screen = QApplication.primaryScreen().availableGeometry()
+        self.resize(screen.width() * 0.7, screen.height() * 0.7)
+
+        # Initialize Core Components
+        self.metronome = Metronome()
+        self.tagger_window = None
+        self.settings_window = None
+
+        self.setStyleSheet(GLOBAL_QSS)
+
+        # Central Widget
+        self.central_widget = QWidget()
+        self.central_widget.setObjectName("CentralWidget")
+        self.setCentralWidget(self.central_widget)
+        self.main_layout = QVBoxLayout(self.central_widget)
+        self.main_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_layout.setSpacing(0)
+
+        # Navigation Drawer (at the edge)
+        self.drawer = NavDrawer()
+
+        # Title Bar
+        self.title_bar = TitleBar(self)
+        self.main_layout.addWidget(self.title_bar)
+
+        # Content Layout
+        self.content_layout = QHBoxLayout()
+        self.content_layout.setContentsMargins(0, 0, 0, 0)
+        self.content_layout.setSpacing(0)
+        self.main_layout.addLayout(self.content_layout)
+
+        self.content_layout.addWidget(self.drawer)
+
+        # Main Page Container (for Media/Chat with margins)
+        self.page_container = QWidget()
+        self.page_layout = QHBoxLayout(self.page_container)
+        self.page_layout.setContentsMargins(15, 15, 20, 0)
+        self.page_layout.setSpacing(15)
+        self.content_layout.addWidget(self.page_container)
+
+        # Content Stack (Media Player / Settings)
+        self.content_stack = QStackedWidget()
+
+        self.media_player = MediaPlayerWidget()
+        self.content_stack.addWidget(self.media_player)  # Index 0
+
+        self.page_layout.addWidget(self.content_stack, stretch=7)
+
+        # Chat Overlay
+        self.chat = ChatOverlay()
+        self.chat.setFixedWidth(400)
+
+        # Wrapper layout to retain bottom margin for chat while media is flush
+        self.chat_layout = QVBoxLayout()
+        self.chat_layout.setContentsMargins(0, 0, 0, 15)
+        self.chat_layout.addWidget(self.chat)
+
+        self.page_layout.addLayout(self.chat_layout, stretch=3)
+
+        # System Tray
+        self.setup_tray()
+
+        # Bus Events
+        self.register_events()
+
+    def setup_tray(self):
+        self.tray_icon = QSystemTrayIcon(self)
+        # Fallback icon if resource missing
+        icon_path = os.path.join("ui_resources", "tray_icon.png")
+        if os.path.exists(icon_path):
+            self.tray_icon.setIcon(QIcon(icon_path))
+
+        self.tray_menu = QMenu()
+        restore_action = QAction("Restore", self)
+        restore_action.triggered.connect(self.showNormal)
+        exit_action = QAction("Exit", self)
+        exit_action.triggered.connect(QApplication.instance().quit)
+
+        self.tray_menu.addAction(restore_action)
+        self.tray_menu.addAction(exit_action)
+        self.tray_icon.setContextMenu(self.tray_menu)
+        self.tray_icon.show()
+
+    def register_events(self):
         Bus.register("new_message", self.on_new_message)
-        Bus.register("new_script_error", self.raise_script_error)
-        Bus.register("clear_chat", self.on_clear_chat)
-        Window.bind(on_key_down=lambda w, key, *largs: self.minimize_to_tray() if key == 286 else None)
-        inspector.create_inspector(Window, self)
-        update_layout()
+        Bus.register("open_tagger", self._open_tagger)
+        Bus.register("open_settings", self._open_settings)
 
-        Window.borderless = True
-        Window.size = (1280, 720)
-        Window.left = 0
-        Window.top = 0
-        Window.clearcolor = (0.08, 0.08, 0.10, 1)
-
-    def on_select_personality(self, *args):
-        _, names, _ = next(os.walk(os.path.join(APPLICATION_ROOT, "Scripts")))
-        personality_picker = Widget(
-            size_hint=(None, None),
-            x=self.select_personality.x + 150,
-            y=self.select_personality.to_window(self.select_personality.x, self.select_personality.y)[1],
-        )
-        personality_picker.layout = BoxLayout(
-            orientation="vertical",
-            size_hint=(None, None),
-            x=self.select_personality.x + 150,
-            y=self.select_personality.to_window(self.select_personality.x, self.select_personality.y)[1],
-        )
-
-        def personality_button(name):
-            Bus.emit("set_personality", name)
-            Window.remove_widget(personality_picker)
-
-        for name in names:
-            button = TAI_MDButton(text=name)
-            button.radius = 0
-            button.bind(on_press=lambda *args: personality_button(name))
-            personality_picker.layout.add_widget(button)
-        personality_picker.add_widget(personality_picker.layout)
-        personality_picker.size = (dp(100), dp(50) * (len(names) - 1))
-        personality_picker.layout.size = (dp(100), dp(50) * (len(names)))
-        Window.add_widget(personality_picker)
-
-    def on_clear_chat(self):
-        self.chat_messages.children = self.chat_messages.children[-1]
+    def _on_drawer_animation_finished(self):
+        # We can clean this up or keep it if we need other callbacks
+        pass
 
     def on_new_message(self, message):
-        if isinstance(message, DommeMessage):
-            return self.domme_is_typing(message)
-        self.post_message(message)
-        if isinstance(message, UserMessage):
-            Clock.schedule_once(lambda _: Bus.emit("new_message", DommeMessage("D", "testing")), 1)
+        # Forward to the chat widget
+        self.chat.post_message(message)
 
-    def post_message(self, message):
-        self.chat_messages.add_widget(message, index=0)
+    def _open_tagger(self):
+        if not self.tagger_window:
+            self.tagger_window = ImageTagger()
+        self.tagger_window.show()
 
-        def scroll_bottom(*args):
-            self.chat_scroll.scroll_y = 0
+    def _open_settings(self):
+        if not self.settings_window:
+            self.settings_window = SettingsWindow()
+            # Disconnect the original close behavior that destroys/hides the top-level widget
+            self.settings_window.btn_close.clicked.disconnect()
+            self.settings_window.btn_close.clicked.connect(self._close_settings)
+            self.content_stack.addWidget(self.settings_window)  # Index 1
 
-        Clock.schedule_once(scroll_bottom, 0)
-        Clock.schedule_once(scroll_bottom, 0.1)
-        self.input_field.focus = True
-        if len(self.chat_messages.children) > 51:
-            self.chat_messages.remove_widget(self.chat_messages.children[-2])
+        self.content_stack.setCurrentWidget(self.settings_window)
 
-    def domme_is_typing(self, message):
-        """Show animated typing, then reveal real message after delay"""
-        Bus.emit("rapid_text_setting_requested", rt := {})
-        if rt["rt"] is True:
-            return
-        self.typing_label = MDLabel(
-            text=f"{message.sender} is typing", padding=(dp(0), dp(0), dp(0), dp(10)), size_hint_y=None
-        )
-        self.typing_label.bind(texture_size=lambda s, t: setattr(s, "height", t[1] + dp(10)))
-        self.post_message(self.typing_label)
-
-        def animate_ellipses(_):
-            if self.typing_label.text.endswith("."):
-                name, dots = self.typing_label.text.split(" is typing")
-                dots = len(dots)
-            else:
-                name = self.typing_label.text.split()[0]
-                dots = 0
-            self.typing_label.text = name + " is typing" + "." * ((dots % 3) + 1)
-
-        self.typing_anim = Clock.schedule_interval(animate_ellipses, 0.5)
-        delay = max(3, len(message.text) * 0.05)
-
-        Clock.schedule_once(self.remove_typing_indicator, delay)
-        Clock.schedule_once(lambda _: self.post_message(message), delay + 0.05)
-
-    def remove_typing_indicator(self, _):
-        if hasattr(self, "typing_anim"):
-            self.typing_anim.cancel()
-        self.chat_messages.remove_widget(self.typing_label)
-
-    def raise_script_error(self, error):
-        label = MDLabel(text=error, md_bg_color=("#d43650"), text_color=(1, 1, 1, 1), size_hint=(0.95, None))
-        label.bind(width=lambda s, w: setattr(s, "text_size", (w, None)))
-        label.bind(texture_size=lambda s, t: setattr(s, "height", t[1]))
-        self.post_message(label)
-
-    def send_user_message(self, *args):
-        Bus.emit("new_message", UserMessage(self.input_field.text))
-        self.input_field.text = ""
-        self.input_field.focus = True
-
-    def minimize_to_tray(self):
-        user32.ShowWindow(self.hwnd, 0)
-        image = PILImage.open("ui_resources/tray_icon.png")
-        menu = pystray.Menu(
-            pystray.MenuItem("Restore", self.restore_from_tray),
-            pystray.MenuItem("Exit", lambda: MDApp.get_running_app().stop()),
-        )
-        icon = pystray.Icon("TeaseAI", image, "TeaseAI", menu)
-
-        def run_tray():
-            icon.run()
-
-        tray_thread = threading.Thread(target=run_tray, daemon=True)
-        tray_thread.start()
-
-    def restore_from_tray(self, icon=None):
-        user32.ShowWindow(self.hwnd, 5)
-        if icon:
-            icon.stop()
-
-    def _on_mouse_pos(self, window, pos):
-        if pos[0] < 28 and self.drawer.state == "close":
-            self.drawer.set_state("open")
-        elif pos[0] > self.drawer.width and self.drawer.state == "open":
-            self.drawer.set_state("close")
-
-
-class TeaseAIApp(MDApp):
-    def build(self):
-        self.theme_cls.primary_palette = "Indigo"
-        self.theme_cls.accent_palette = "Amber"
-        self.theme_cls.theme_style = "Dark"
-        self.theme_cls.material_style = "M3"
-        return MainScreen()
+    def _close_settings(self):
+        self.content_stack.setCurrentWidget(self.media_player)
 
 
 if __name__ == "__main__":
-    TeaseAIApp().run()
+    app = QApplication(sys.argv)
+    window = MainWindow()
+    window.show()
+    sys.exit(app.exec())

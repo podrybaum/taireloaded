@@ -2,15 +2,19 @@ import os
 import random
 import shutil
 from datetime import datetime, timedelta
-
+from PySide6.QtCore import QTimer
 from bus import Bus
 from dispatch_dict import DISPATCH_DICT
-from message_classes import SystemMessage, UserMessage
-from tokens import StringToken, IntegerToken, HeadlineToken
+from message_classes import UserMessage
+from tokens import StringToken, IntegerToken
+from execution_modes import EdgeTauntCycle
 from tai_exceptions import SyntaxErr, TypeErr, ValueErr, RuntimeErr
 from custom_mode import CustomMode
 from utils import (
+    add_time,
     convert_string_time_to_seconds,
+    get_settings,
+    get_runtime,
     is_image_file,
     random_script,
     date_from_string,
@@ -19,7 +23,7 @@ from utils import (
     string_from_date,
     is_valid_filename,
 )
-from kivymd.app import Clock
+from slideshow import URL_File
 
 APPLICATION_ROOT = os.path.dirname(os.path.abspath(__file__))
 
@@ -124,441 +128,418 @@ class Dispatch(metaclass=DispatchMeta):
         return lines[index]
 
     @staticmethod
-    def NOP(runtime, *args):
+    def NOP(*args):
         pass
         # Done
 
     @validate_params
     @staticmethod
-    def AFK(runtime, arg):
-        runtime.AFK = arg.Evaluate()
+    def AFK(arg):
+        Bus.emit("set_AFK", arg.Evaluate())
         # Done
 
     @validate_params
     @staticmethod
-    def AcceptAnswer(runtime):
+    def AcceptAnswer():
         pass  # doesn't need an implementation, we just match the string value
         # Done
 
     @validate_params
     @staticmethod
-    def AddContact(runtime, arg):
+    def AddContact(arg):
         if arg.Evaluate() not in [1, 2, 3, 4, 5, 6]:
             ValueErr("Invalid contact number", *arg.get_position()).throw()
-        runtime._present.add(arg.Evaluate())
-        runtime.last_joined = runtime.settings.id_to_name(arg.Evaluate())
-        if not runtime.hide_chat:
-            Bus.emit("new_message", SystemMessage(f"{runtime.last_joined} has joined the chat."))
-        else:
-            runtime._hide_chat = False
+        Bus.emit("add_entity", arg.Evaluate())
         # Done
 
     @validate_params
     @staticmethod
-    def AddDomme(runtime):
-        runtime._present.add("D")
-        runtime.last_joined = runtime.settings.Domme.name
-        if not runtime.hide_chat:
-            Bus.emit("new_message", SystemMessage(f"{runtime.last_joined} has joined the chat."))
-        else:
-            runtime.hide_chat = False
+    def AddDomme():
+        Bus.emit("add_entity", "D")
         # Done
 
     @validate_params
     @staticmethod
-    def AddEdgeHoldTime(runtime, arg1=None, arg2=None):
-        if arg1 is None:
-            runtime.edge_hold_time += random.randomint(
-                runtime.settings.Sub.min_edge_hold_time, runtime.settings.Sub.max_edge_hold_time
-            )
-        seconds = convert_string_time_to_seconds(arg1.Evaluate())
-        if seconds == "invalid units":
-            SyntaxErr("Invalid time units", *arg1.get_position()).throw()
-        if arg2 is not None:
-            arg2seconds = convert_string_time_to_seconds(arg2.Evaluate())
-            if arg2seconds == "invalid units":
-                SyntaxErr("Invalid time units", *arg2.get_position()).throw()
-            runtime.edge_hold_time += random.randint(seconds, arg2seconds)
-        else:
-            runtime.edge_hold_time += arg1.Evaluate()
-            # done
+    def AddEdgeHoldTime(arg1=None, arg2=None):
+        add_time("add_edge_hold_time", arg1, arg2)
+        # done
 
     @validate_params
     @staticmethod
-    def AddStrokeTime(runtime, arg1=None, arg2=None):
-        if arg1 is None:
-            runtime.stroke_time += random.randomint(runtime.settings.TauntCycleMin, runtime.settings.TauntCycleMax)
-        seconds = convert_string_time_to_seconds(arg1.Evaluate())
-        if seconds == "invalid units":
-            SyntaxErr("Invalid time units", *arg1.get_position()).throw()
-        if arg2 is not None:
-            arg2seconds = convert_string_time_to_seconds(arg2.Evaluate())
-            if arg2seconds == "invalid units":
-                SyntaxErr("Invalid time units", *arg2.get_position()).throw()
-            runtime.stroke_time += random.randint(seconds, arg2seconds)
-        else:
-            runtime.stroke_time += arg1.Evaluate()
+    def AddStrokeTime(arg0=None, arg1=None):
+        handler = getattr(get_runtime()._current_frame, "handler", None)
+        if not handler or not hasattr(handler, "add_time"):
+            return
+        if arg0 is None and arg1 is None:
+            min = get_settings().taunt_cycle_min
+            max = get_settings().taunt_cycle_max
+            handler.add_time(random.randint(min, max) * 1000)
+        elif isinstance(arg0, IntegerToken):
+            min = arg0.Evaluate()
+            if arg1 is None:
+                handler.add_time(min * 1000)
+            elif isinstance(arg1, IntegerToken):
+                handler.add_time(random.randint(min, arg1.Evaluate()) * 1000)
+            elif isinstance(arg1, StringToken):
+                max = convert_string_time_to_seconds(arg1.Evaluate())
+                handler.add_time(random.randint(min, max) * 1000)
+        elif isinstance(arg0, StringToken):
+            min = convert_string_time_to_seconds(arg0.Evaluate())
+            if arg1 is None:
+                handler.add_time(min * 1000)
+            elif isinstance(arg1, IntegerToken):
+                handler.add_time(random.randint(min, arg1.Evaluate()) * 1000)
+            elif isinstance(arg1, StringToken):
+                max = convert_string_time_to_seconds(arg1.Evaluate())
+                handler.add_time(random.randint(min, max) * 1000)
+        # done
+
+    @validate_params
+    @staticmethod
+    def AddTeaseTime(arg1=None, arg2=None):
+        add_time("add_tease_time", arg1, arg2)
         # Done
 
     @validate_params
     @staticmethod
-    def AddTeaseTime(runtime, arg1=None, arg2=None):
-        if arg1 is None:
-            runtime.tease_time += random.randomint(runtime.settings.MinTeaseLength, runtime.settings.MaxTeaseLength)
-        seconds = convert_string_time_to_seconds(arg1.Evalute())
-        if seconds == "invalid units":
-            SyntaxErr("Invalid time units", *arg1.get_position()).throw()
-        if arg2 is not None:
-            arg2seconds = convert_string_time_to_seconds(arg2.Evaluate())
-            if arg2seconds == "invalid units":
-                SyntaxErr("Invalid time units", *arg2.get_position()).throw()
-            runtime.tease_time += random.randint(seconds, arg2seconds)
-        else:
-            runtime.tease_time += arg1.Evaluate()
-        # Done
-
-    @validate_params
-    @staticmethod
-    def Afternoon(runtime):
+    def Afternoon():
         hour = datetime.now().hour
         return hour > 12 and hour < 19
         # Done
 
     @validate_params
     @staticmethod
-    def AllowsOrgasm(runtime):
-        return runtime.settings.Domme.allows_orgasms != 5
+    def AllowsOrgasm():
+        return get_settings().Domme.allows_orgasms != 5
         # Done
 
     @validate_params
     @staticmethod
-    def ApathyLevel(runtime, arg0):
-        return runtime.settings.Domme.apathy_level == arg0.Evaluate()
+    def ApathyLevel(arg0):
+        return get_settings().Domme.apathy_level == arg0.Evaluate()
         # Done
 
     @validate_params
     @staticmethod
-    def BeforeTease(runtime):
-        return runtime.round < 1
+    def BeforeTease():
+        return get_runtime().round == 0
         # Done
 
     @validate_params
     @staticmethod
-    def BookmarkLink(runtime):
-        if runtime._context == "link":
-            runtime._bookmark_link = True
+    def BookmarkLink():
+        Bus.emit("bookmark_link")
         # Done
 
     @validate_params
     @staticmethod
-    def BookmarkModule(runtime):
-        if runtime._context == "module":
-            runtime._bookmark_module = True
+    def BookmarkModule():
+        Bus.emit("bookmark_module")
         # Done
 
     @validate_params
     @staticmethod
-    def Call(runtime, arg0, arg1=None):
-        runtime.blocks = []
-        runtime.execute_script(arg0.Evaluate())
-        if arg1 is not None:
-            Dispatch._registry["Goto"](arg1)
+    def Call(arg0, arg1=None):
+        get_runtime().call(arg0.Evaluate(), arg1.Evaluate() if arg1 is not None else None)
         # Done
 
     @validate_params
     @staticmethod
-    def CallRandom(runtime, arg0):
-        tok = StringToken(*arg0.get_position(), random_script(arg0.Evaluate()))
-        Dispatch.Call(tok)
+    def CallRandom(arg0):
+        if os.path.isdir(arg0.Evaluate()):
+            get_runtime().call(random_script(arg0.Evaluate()))
+        else:
+            ValueErr(
+                "Invalid parameter: argument to @CallRandom must be a valid directory.", *arg0.get_position()
+            ).throw()
         # Done
 
     @validate_params
     @staticmethod
-    def CallReturn(runtime, arg0, arg1=None):
-        runtime.execute_script(arg0.Evaluate())
-        if arg1 is not None:
-            Dispatch._registry["Goto"](arg1)
+    def CallReturn(arg0, arg1=None):
+        get_runtime().call_return(arg0.Evaluate(), arg1.Evaluate() if arg1 is not None else None)
         # Done
 
     @validate_params
     @staticmethod
-    def CameMode(runtime, arg0, arg1):
+    def CameMode(arg0, arg1):
         mode = arg0.Evaluate().lower()
         if mode not in ["video", "goto"]:
             ValueErr(
                 "Invalid parameter: first argument to @CameMode must be one of 'video' or 'goto'." * arg0.get_position()
             ).throw()
-        runtime.mode = CustomMode(arg0.Evaluate().lower(), arg1, ["came"])
+        CustomMode(get_runtime(), mode, arg1.Evaluate(), ["came"])
         # Done
 
+    # BOOKMARK
     @validate_params
     @staticmethod
-    def CBT(runtime, arg0=None):
-        path = os.path.join(APPLICATION_ROOT, "SystemScripts\\")
+    def CBT(arg0=None):
+        path = os.path.join(APPLICATION_ROOT, "SystemScripts")
         if arg0 is None:
-            first = random.choice([first for first in os.listdir(path) if first.endswith("_First.txt")])
-        elif arg0.Evaluate().lower() == "cock":
-            first = "CBTCock_First.txt"
-        elif arg0.Evaluate().lower() == "balls":
-            first = "CBTBalls_First.txt"
+            first = random.choice([f for f in os.listdir(path) if f.endswith("_First.txt")])
         else:
-            ValueErr("Invalid parameter: argument to @CBT must be one of 'cock' or 'balls'", *arg0.get_position())
-            if os.path.isfile(first):
-                with open(first, "r") as f:
-                    lines = f.readlines()
-                index = random.randint(0, len(lines) - 1)
-                line = lines[index]
-                index += 1
-                runtime.execute_string(line, first, index)
-            else:
-                RuntimeErr(f"Missing file for CBT task generation: {first}", *arg0.get_postion()).throw()
+            val = arg0.Evaluate().lower()
+            if val not in ["cock", "balls"]:
+                ValueErr(
+                    "Invalid parameter: argument to @CBT must be one of 'cock' or 'balls'", *arg0.get_position()
+                ).throw()
+            first = f"CBT{val.capitalize()}_First.txt"
+            if val == "balls":
+                get_runtime().cbt_balls += 1
+
+        full_path_first = os.path.join(path, first)
+        script_text = ""
+
+        if os.path.isfile(full_path_first):
+            with open(full_path_first, "r") as f:
+                lines = f.readlines()
+            if lines:
+                script_text += random.choice(lines).strip() + "\n"
+        else:
+            RuntimeErr(f"Missing file for CBT task generation: {first}").throw()
+
+        if arg0 is None:
             files = [file for file in os.listdir(path) if file.startswith("CBT") and not file.endswith("_First.txt")]
-            tasks = random.randint(1, 5) * runtime.settings.Sub.ctb_level
-            if arg0 is None:
-                file = random.choice(files)
-            elif arg0.Evaluate().lower() == "cock":
-                file = "CBTCock.txt"
-            elif arg0.Evaluate().lower() == "balls":
-                file = "CBTBalls.txt"
+            file = random.choice(files) if files else None
+        else:
+            file = f"CBT{val.capitalize()}.txt"
 
-            if os.path.isfile(file):
-                with open(file, "r") as f:
-                    lines = f.readlines()
-                while tasks > 0:
-                    index = random.randint(0, len(lines) - 1)
-                    line = lines[index]
-                    index += 1
-                    tasks -= 1
-                    runtime.execute_string(line, first, index)
-            else:
-                RuntimeErr(f"Missing file for CBT task generation: {first}", *arg0.get_postion()).throw()
+        full_path_file = os.path.join(path, file) if file else None
+        tasks = random.randint(1, 5) * get_settings().Sub.CBTLevel
+
+        if full_path_file and os.path.isfile(full_path_file):
+            with open(full_path_file, "r") as f:
+                lines = [line.strip() for line in f.readlines() if line.strip()]
+            while tasks > 0 and lines:
+                script_text += random.choice(lines) + "\n"
+                tasks -= 1
+        else:
+            RuntimeErr(f"Missing file for CBT task generation: {file}", *arg0.get_position()).throw()
+
+        script_text += "\n@End\n"
+        # Switch state to cbt or cbt_balls
+        state_mode = "cbt_balls" if (arg0 and arg0.Evaluate().lower() == "balls") else "cbt_cock"
+        get_runtime()._state = state_mode
+        get_runtime().execute_memory_script(script_text, source_name="CBT_Routine", context="cbt")
+
+    @validate_params
+    @staticmethod
+    def CBTLevel(arg0):
+        return get_settings().Sub.CBTLevel == arg0.Evaluate()
         # Done
 
     @validate_params
     @staticmethod
-    def CBTLevel(runtime, arg0):
-        return runtime.settings.Sub.CBTLevel == arg0.Evaluate()
-        # Done
+    def CensorbarOff(arg0, arg1=None):
+        num = int(arg0.Evaluate())
+        Bus.emit("hide_censor_bar", num)
 
     @validate_params
     @staticmethod
-    def CensorbarOff(runtime, arg0, arg1):
-        pass
+    def CensorbarOn(arg0, arg1, arg2, arg3, arg4, arg5=None):
+        num = int(arg0.Evaluate())
+        x = int(arg1.Evaluate())
+        y = int(arg2.Evaluate())
+        w = int(arg3.Evaluate())
+        h = int(arg4.Evaluate())
+        text = str(arg5.Evaluate()) if arg5 else ""
+        Bus.emit("show_censor_bar", num, x, y, w, h, text)
 
     @validate_params
     @staticmethod
-    def CensorbarOn(runtime, arg0, arg1, arg2, arg3, arg4, arg5):
-        pass
-
-    @validate_params
-    @staticmethod
-    def Chance(runtime, arg0, arg1):
+    def Chance(arg0, arg1):
         if random.randint(0, 100) < arg0.Evaluate():
-            return Dispatch._registry["Goto"](arg1)
+            get_runtime().goto(arg1.Evaluate())
         # Done
 
     @validate_params
     @staticmethod
-    def Chastity(runtime, arg0):
-        runtime.in_chastity = arg0.Evaluate()
+    def Chastity(arg0):
+        get_runtime().in_chastity = arg0.Evaluate()
         # Done
 
     @validate_params
     @staticmethod
-    def ChastityPA(runtime):
-        return runtime.settings.Sub.ChastityPiercing
+    def ChastityPA():
+        return get_settings().Sub.chastity_piercing
         # Done
 
     @validate_params
     @staticmethod
-    def ChastitySpikes(runtime):
-        return runtime.settings.Sub.ChastitySpikes
+    def ChastitySpikes():
+        return get_settings().Sub.chastity_spikes
         # Done
 
     @validate_params
     @staticmethod
-    def ChatImage(runtime, arg0):
+    def ChatImage(arg0):
         return f'<img src="{arg0.Evaluate()}">'
         # Done
 
     @validate_params
     @staticmethod
-    def CheckBnB(runtime):
-        if not os.path.isdir(runtime.settings.boobs_images) or not os.path.isdir(runtime.settings.butts_images):
-            tok = StringToken(*runtime.get_position(), "No BnB")
-            return Dispatch._registry["Goto"](tok)
-        else:
-            files = os.path.listdir(runtime.settings.boobs_images)
-            if len(files) == 0:
-                tok = StringToken(*runtime.get_position(), "No BnB")
-                return Dispatch._registry["Goto"](tok)
-            files = os.path.listdir(runtime.settings.butts_images)
-            if len(files) == 0:
-                tok = StringToken(*runtime.get_position(), "No Bnb")
-                return Dispatch._registry["Goto"](tok)
+    def CheckBnB():
+        boobs = get_settings().boobs_images
+        butts = get_settings().butts_images
+        if not os.path.isdir(boobs) or len(os.listdir(boobs)) == 0:
+            boobs = False
+        if not os.path.isdir(butts) or len(os.listdir(butts)) == 0:
+            butts = False
+        if not boobs and not butts:
+            get_runtime().goto("No BnB")
         # Done
 
     @validate_params
     @staticmethod
-    def CheckDate(runtime, arg0, arg1=None, arg2=None):
-        if os.path.isfile(os.path.join(runtime.var_path, arg0.Evaluate())):
-            with open(os.path.join(runtime.var_path, arg0.Evaluate()), "r") as f:
-                datestring = f.read()
-            date = date_from_string(datestring)
+    def CheckDate(arg0, arg1=None, arg2=None):
+        varpath = os.path.join(APPLICATION_ROOT, "Scripts", get_settings().current_personality, "System\\Variables")
+        if os.path.isfile(os.path.join(varpath, arg0.Evaluate())):
+            with open(os.path.join(varpath, arg0.Evaluate()), "r") as f:
+                date = date_from_string(f.read())
             if arg1 is None and date < datetime.now():
                 return True
-            if arg1 and arg2 is None:
+            if arg1:
                 delta_seconds = convert_string_time_to_seconds(arg1.Evaluate())
                 if delta_seconds == "invalid units":
                     ValueErr("Invalid time units", *arg1.get_position()).throw()
-                if date < datetime.now() - timedelta(seconds=delta_seconds):
+                if arg2 is None and date < datetime.now() - timedelta(seconds=delta_seconds):
                     return True
-            if arg1 and arg2:
-                delta_seconds = convert_string_time_to_seconds(arg1.Evaluate())
-                if delta_seconds == "invalid units":
-                    ValueErr("Invalid time units", *arg1.get_position()).throw()
-                delta_seconds2 = convert_string_time_to_seconds(arg2.Evaluate())
-                if delta_seconds2 == "invalid units":
-                    ValueErr("Invalid time units", *arg2.get_position()).throw()
-                if date < datetime.now() - timedelta(seconds=delta_seconds) and date > datetime.now() - timedelta(
-                    seconds=delta_seconds2
-                ):
-                    return True
+                elif arg2:
+                    delta_seconds2 = convert_string_time_to_seconds(arg2.Evaluate())
+                    if delta_seconds2 == "invalid units":
+                        ValueErr("Invalid time units", *arg1.get_position()).throw()
+                    if date < datetime.now() - timedelta(seconds=delta_seconds) and date > datetime.now() - timedelta(
+                        seconds=delta_seconds2
+                    ):
+                        return True
         else:
-            return False
-            # Done
-
-    @validate_params
-    @staticmethod
-    def CheckFlag(runtime, arg0, arg1):
-        path = os.path.join(runtime.flag_path, arg0.Evaluate())
-        if os.path.isfile(path):
-            Dispatch._registry["Goto"](arg1)
+            RuntimeErr(f"Variable {arg0.Evaluate()} not found", *arg0.get_position()).throw()
         # Done
 
     @validate_params
     @staticmethod
-    def CheckJoiVideo(runtime):
-        if not os.path.isdir(runtime.settings.joi_video):
-            tok = StringToken(*runtime.get_position(), "No JOI Found")
-            return Dispatch._registry["Goto"](tok)
+    def CheckFlag(arg0, arg1):
+        flag = arg0.Evaluate()
+        flags = getattr(get_settings(), "Flags", {}).setdefault(get_settings().current_personality, [])
+        if flag in flags or flag in get_runtime()._temp_flags:
+            get_runtime().goto(arg1.Evaluate())
         # Done
 
     @validate_params
     @staticmethod
-    def CheckStrokingState(runtime):
-        if runtime.stroking_state:
-            tok = StringToken(*runtime.get_position(), "Sub Stroking")
-            return Dispatch._registry["Goto"](tok)
+    def CheckJoiVideo():
+        if not os.path.isdir(get_settings().joi_video) or len(os.listdir(get_settings().joi_video)) == 0:
+            get_runtime().goto("No JOI Found")
         # Done
 
     @validate_params
     @staticmethod
-    def CheckTnA(runtime):
-        if runtime.tna_fast_slides_result == "Boobs":
-            tok = StringToken(*runtime.get_position(), "Boobs")
-            return Dispatch._registry["Goto"](tok)
-        elif runtime.tna_fast_slides_result == "Butt":
-            tok = StringToken(*runtime.get_position(), "Butt")
-            return Dispatch._registry["Goto"](tok)
+    def CheckStrokingState():
+        if get_runtime().state == "stroking":
+            get_runtime().goto("Sub Stroking")
         # Done
 
     @validate_params
     @staticmethod
-    def CheckVideo(runtime):
+    def CheckTnA():
+        if get_runtime().tna_result:
+            get_runtime().goto(get_runtime().tna_result)
+        # Done
+
+    @validate_params
+    @staticmethod
+    def CheckVideo():
         video_dirs = [
-            runtime.settings.joi_video,
-            runtime.settings.hardcore_video,
-            runtime.settings.softcore_video,
-            runtime.settings.lesbian_video,
-            runtime.settings.blowjob_video,
-            runtime.settings.femdom_video,
-            runtime.settings.femsub_video,
-            runtime.settings.ch_video,
-            runtime.settings.general_video,
+            get_settings().joi_video,
+            get_settings().hardcore_video,
+            get_settings().softcore_video,
+            get_settings().lesbian_video,
+            get_settings().blowjob_video,
+            get_settings().femdom_video,
+            get_settings().femsub_video,
+            get_settings().ch_video,
+            get_settings().general_video,
         ]
-        for video_dir in video_dirs:
-            if not os.path.isdir(video_dir):
-                tok = StringToken(*runtime.get_position(), "No Videos Found")
-                return Dispatch._registry["Goto"](tok)
-            files = os.listdir(video_dir)
-            if len(files) == 0:
-                tok = StringToken(*runtime.get_position(), "No Videos Found")
-                return Dispatch._registry["Goto"](tok)
-            tok = StringToken(*runtime.get_position(), "Videos Found")
-            return Dispatch._registry["Goto"](tok)
+        if all(os.path.isdir(video_dir) and len(os.listdir(video_dir)) > 0 for video_dir in video_dirs):
+            return get_runtime().goto("Videos Found")
+        return get_runtime().goto("No Videos Found")
         # Done
 
     @validate_params
     @staticmethod
-    def ClearChat(runtime):
+    def ClearChat():
         Bus.emit("clear_chat")
+        # NFI - hook up in chat window
+
+    @validate_params
+    @staticmethod
+    def ClearModes():
+        Bus.emit("clear_modes")
         # Done
 
     @validate_params
     @staticmethod
-    def ClearModes(runtime):
-        if runtime.mode is not None:
-            del runtime.mode
-            runtime.mode = None
+    def Contact(arg0):
+        get_runtime().active_domme = get_settings().domme_id_to_object(arg0.Evaluate()).name
         # Done
 
     @validate_params
     @staticmethod
-    def Contact(runtime, arg0):
-        runtime.active_domme = arg0.Evaluate()
+    def ContactKeyword(arg0, arg1):
+        return get_settings().contact_namespace(arg0.Evaluate(), arg1.Evaluate())
         # Done
 
     @validate_params
     @staticmethod
-    def ContactKeyword(runtime, arg0, arg1):
-        return runtime.settings.contact_namespace(arg0.Evaluate(), arg1.Evaluate())
-        # Done
-
-    @validate_params
-    @staticmethod
-    def ContinueVideo(runtime):
+    def ContinueVideo():
         Bus.emit("unpause_video")
         # Done
 
     @validate_params
     @staticmethod
-    def CountVar(runtime, arg0):
-        if not is_valid_filename(arg0.Evaluate()):
+    def CountVar(arg0):
+        var_name = arg0.Evaluate()
+        if not is_valid_filename(var_name):
             ValueErr("Invalid filename specified for @CountVar", *arg0.get_position()).throw()
 
         def count():
             i = 0
             while True:
-                with open(os.path.join(runtime.var_path, arg0.Evaluate()), "w") as f:
-                    f.write(i)
+                vars_dict = getattr(get_settings(), "Variables", {}).setdefault(get_settings().current_personality, {})
+                vars_dict[var_name] = i
+                Bus.emit("save_settings")
                 i += 1
                 yield i
 
-        Clock.schedule_interval(lambda _: next(count()), 1)
+        from PySide6.QtCore import QTimer
+
+        timer = QTimer(get_runtime()._current_frame.handler)
+        timer.timeout.connect(lambda: next(count()))
+        timer.start(1000)
         # Done
 
     @validate_params
     @staticmethod
-    def CumForMe(runtime):
+    def CumForMe():
         return Dispatch.vocab("#CumForMe")
         # Done
 
     @validate_params
     @staticmethod
-    def CustomMode(runtime, arg0, arg1, arg2):
+    def CustomMode(arg0, arg1, arg2):
         mode = arg1.Evaluate().lower()
         if mode not in ["video", "goto"]:
             ValueErr(
                 "Invalid parameter: first argument to @CustomMode must be one of 'video' or 'goto'",
                 *arg1.get_position(),
             ).throw()
-        runtime.mode = CustomMode(arg0.Evaluate(), mode, arg2)
+        CustomMode(arg0.Evaluate(), mode, arg2)
         # Done
 
     @validate_params
     @staticmethod
-    def CustomTask(runtime, arg0):
+    def CustomTask(arg0):
         filename = arg0.Evaluate()
         path = os.path.join(APPLICATION_ROOT, "Custon\\Tasks")
         first = os.path.join(path, filename + "_First.txt")
@@ -568,11 +549,11 @@ class Dispatch(metaclass=DispatchMeta):
             index = random.randint(0, len(lines) - 1)
             line = lines[index]
             index += 1
-            runtime.execute_string(line, first, index)
+            get_runtime().execute_string(line, first, index)
         else:
             RuntimeErr(f"Missing file for custom task generation: {first}", *arg0.get_postion()).throw()
         file = os.path.join(path, filename + ".txt")
-        tasks = random.randint(1, 5) * runtime.settings.Sub.ctb_level
+        tasks = random.randint(1, 5) * get_settings().Sub.ctb_level
         if os.path.isfile(file):
             with open(file, "r") as f:
                 lines = f.readlines()
@@ -581,14 +562,14 @@ class Dispatch(metaclass=DispatchMeta):
                 line = lines[index]
                 index += 1
                 tasks -= 1
-                runtime.execute_string(line, first, index)
+                get_runtime().execute_string(line, first, index)
         else:
             RuntimeErr(f"Missing file for custom task generation: {first}", *arg0.get_postion()).throw()
         # Done
 
     @validate_params
     @staticmethod
-    def DateDifference(runtime, arg0, arg1):
+    def DateDifference(arg0, arg1):
         arg0 = date_from_string(arg0.Evaluate())
         if arg0 == "invalid units":
             ValueErr("Invalid date", *arg0.get_position()).throw()
@@ -613,20 +594,20 @@ class Dispatch(metaclass=DispatchMeta):
 
     @validate_params
     @staticmethod
-    def Day(runtime, arg0):
+    def Day(arg0):
         return arg0.Evaluate() == datetime.now().day
         # Done
 
     @validate_params
     @staticmethod
-    def DayOfWeek(runtime, arg0):
+    def DayOfWeek(arg0):
         days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
         return days[datetime.now().isoweekday()] == arg0.Evaluate()
         # Done
 
     @validate_params
     @staticmethod
-    def DecideEdge(runtime):
+    def DecideEdge():
         if random.randint(0, 1) == 0:
             return Dispatch.vocab("#HoldTheEdge")
         else:
@@ -635,132 +616,146 @@ class Dispatch(metaclass=DispatchMeta):
 
     @validate_params
     @staticmethod
-    def DecideOrgasm(runtime, arg0, arg1, arg2):
+    def DecideOrgasm(arg0, arg1, arg2):
         chance_map = {1: 100, 2: 75, 3: 50, 4: 20, 5: 0}
-        if runtime.context == "end":
-            if random.randint(0, 100) < chance_map[runtime.settings.Domme.allows_orgasms]:
-                Dispatch.Goto(arg0 or StringToken(*runtime.get_position(), "Orgasm Allow"))
+        if get_runtime()._current_frame.context == "end":
+            if random.randint(0, 100) < chance_map[get_settings().Domme.allows_orgasms]:
+                get_runtime().goto(arg0.Evaluate() if arg0 is not None else "Orgasm Allow")
             else:
-                if random.randint(0, 100) < chance_map[runtime.settings.Domme.ruins_orgasms]:
-                    Dispatch.Goto(arg1 or StringToken(*runtime.get_position(), "Orgasm Ruin"))
+                if random.randint(0, 100) < chance_map[get_settings().Domme.ruins_orgasms]:
+                    get_runtime().goto(arg1.Evaluate() if arg1 is not None else "Orgasm Ruin")
                 else:
-                    Dispatch.Goto(arg2 or StringToken(*runtime.get_position(), "Orgasm Deny"))
+                    get_runtime().goto(arg2.Evaluate() if arg2 is not None else "Orgasm Deny")
         else:
-            SyntaxErr("@DecideOrgasm is only allowed in end scripts", *runtime.get_position()).throw()
+            SyntaxErr("@DecideOrgasm is only allowed in end scripts", *get_runtime().get_position()).throw()
         # Done
 
     @validate_params
     @staticmethod
-    def DecreaseOrgasmChance(runtime):
-        runtime.settings.Domme.AllowsOrgasm -= 1
+    def DecreaseOrgasmChance():
+        get_settings().Domme.allows_orgasms -= 1
         # Done
 
     @validate_params
     @staticmethod
-    def DecreaseRuinChance(runtime):
-        runtime.settings.Domme.RuinsOrgasms -= 1
+    def DecreaseRuinChance():
+        get_settings().Domme.ruins_orgasms -= 1
         # Done
 
     @validate_params
     @staticmethod
-    def DeleteFlag(runtime, arg0):
+    def DeleteFlag(arg0):
         flag = arg0.Evaluate()
-        if flag in runtime._temp_flags:
-            runtime._temp_flags.remove(flag)
-        filepath = os.path.join(runtime.flag_path, flag)
-        if os.path.isfile(filepath):
-            os.remove(filepath)
+        if flag in get_runtime()._temp_flags:
+            get_runtime()._temp_flags.remove(flag)
+        flags = getattr(get_settings(), "Flags", {}).setdefault(get_settings().current_personality, [])
+        if flag in flags:
+            flags.remove(flag)
+            Bus.emit("save_settings")
         # Done
 
     @validate_params
     @staticmethod
-    def DeleteLocalImage(runtime, arg0):
-        if not runtime.settings.AllowDomToDeleteLocalImages:
+    def DeleteLocalImage(arg0):
+        if not get_settings().domme_delete:
             return
         if os.path.isfile(arg0.Evaluate()):
+            response = {"current_image": None}
+            Bus.emit("get_current_image", response=response)
             shutil.move(
-                runtime.current_image_path,
+                response["current_image"],
                 os.path.join(APPLICATION_ROOT, "\\DeletedImages\\", os.path.basename(arg0.Evaluate())),
             )
         # Done
 
     @validate_params
     @staticmethod
-    def DeleteVar(runtime, arg0):
-        filepath = os.path.join(runtime.var_path, arg0.Evaluate())
-        if os.path.isfile(filepath):
-            os.remove(filepath)
+    def DeleteVar(arg0):
+        var_name = arg0.Evaluate()
+        vars_dict = getattr(get_settings(), "Variables", {}).setdefault(get_settings().current_personality, {})
+        if var_name in vars_dict:
+            del vars_dict[var_name]
+            Bus.emit("save_settings")
         # Done
 
     @validate_params
     @staticmethod
-    def DifferentAnswer(runtime):
+    def DifferentAnswer():
         pass  # doesn't need an implementation, we just match the string value
         # Done
 
     @validate_params
     @staticmethod
-    def DislikeBlogImage(runtime):
-        pass
-
-    @validate_params
-    @staticmethod
-    def Domme(runtime, arg0):
-        return runtime.settings.domme_namespace(arg0.Evaluate())
+    def DislikeBlogImage():
+        response = {"current_image": None}
+        Bus.emit("get_current_image", response=response)
+        if os.path.isfile(response["current_image"]):
+            shutil.move(
+                response["current_image"],
+                os.path.join(APPLICATION_ROOT, "\\DislikedImages\\", os.path.basename(response["current_image"])),
+            )
         # Done
 
     @validate_params
     @staticmethod
-    def DommeAvatarReset(runtime):
-        if runtime.domme_avatar_backup:
-            runtime.settings.Domme._avatar = runtime.domme_avatar_backup
-            runtime.domme_avatar_backup = None
+    def Domme(arg0):
+        return get_settings().domme_namespace(arg0.Evaluate())
         # Done
 
     @validate_params
     @staticmethod
-    def DommeAvatarTemp(runtime, arg0):
-        runtime.domme_avatar_backup = runtime.settings.Domme._avatar
-        runtime.settings.Domme._avatar = arg0.Evaluate()
+    def DommeAvatarReset():
+        if get_settings().Domme.avatar_backup:
+            get_settings().Domme._avatar = get_settings().Domme.avatar_backup
+            get_settings().Domme.avatar_backup = None
         # Done
 
     @validate_params
     @staticmethod
-    def DommeLevel(runtime, *args):
+    def DommeAvatarTemp(arg0):
+        get_settings().Domme.avatar_backup = get_settings().Domme._avatar
+        get_settings().Domme._avatar = arg0.Evaluate()
+        # Done
+
+    @validate_params
+    @staticmethod
+    def DommeLevel(*args):
         for arg in args:
-            if runtime.settings.Domme.Level == arg.Evaluate():
+            if get_settings().Domme.Level == arg.Evaluate():
                 return True
         return False
         # Done
 
     @validate_params
     @staticmethod
-    def DommeNameReset(runtime):
-        if runtime.domme_name_backup:
-            runtime.active_domme = runtime.domme_name_backup
-            runtime.domme_name_backup = None
+    def DommeNameReset():
+        if get_settings().Domme.name_backup:
+            get_settings().Domme.name = get_settings().Domme.name_backup
+            get_settings().Domme.name_backup = None
         # Done
 
     @validate_params
     @staticmethod
-    def DommeNameTemp(runtime, arg0):
-        runtime.domme_name_backup = runtime.active_domme.name
-        runtime.active_domme.name = arg0.Evaluate()
+    def DommeNameTemp(arg0):
+        get_settings().Domme.name_backup = get_settings().Domme.name
+        get_settings().Domme.name = arg0.Evaluate()
         # Done
 
     @validate_params
     @staticmethod
-    def DommeTag(runtime, *args):
+    def DommeTag(*args):
         args = [arg.Evaluate() for arg in args]
-        if os.path.isdir(runtime.settings.Domme._image_folder):
-            if os.path.isfile(os.path.join(runtime.settings.Domme._image_folder, "ImageTags.txt")):
-                with open(os.path.join(runtime.settings.Domme._image_folder, "ImageTags.txt"), "r") as f:
+        if os.path.isdir(get_settings().Domme._image_folder):
+            if os.path.isfile(os.path.join(get_settings().Domme._image_folder, "ImageTags.txt")):
+                with open(os.path.join(get_settings().Domme._image_folder, "ImageTags.txt"), "r") as f:
                     lines = f.readlines()
                 lines = [line.split() for line in lines]
+                response = {"current_image": None}
+                Bus.emit("get_current_image", response)
                 for line in lines:
                     if (
                         all(args) in line
-                        and os.path.join(runtime.settings.Domme._image_folder, line[0]) == runtime._current_image_path
+                        and os.path.join(get_settings().Domme._image_folder, line[0]) == response["current_image"]
                     ):
                         return True
                 return False
@@ -768,17 +763,19 @@ class Dispatch(metaclass=DispatchMeta):
 
     @validate_params
     @staticmethod
-    def DommeTagAny(runtime, *args):
+    def DommeTagAny(*args):
         args = [arg.Evaluate() for arg in args]
-        if os.path.isdir(runtime.settings.Domme._image_folder):
-            if os.path.isfile(os.path.join(runtime.settings.Domme._image_folder, "ImageTags.txt")):
-                with open(os.path.join(runtime.settings.Domme._image_folder, "ImageTags.txt"), "r") as f:
+        if os.path.isdir(get_settings().Domme._image_folder):
+            if os.path.isfile(os.path.join(get_settings().Domme._image_folder, "ImageTags.txt")):
+                with open(os.path.join(get_settings().Domme._image_folder, "ImageTags.txt"), "r") as f:
                     lines = f.readlines()
                 lines = [line.split() for line in lines]
+                response = {"current_image": None}
+                Bus.emit("get_current_image", response)
                 for line in lines:
                     if (
                         any(args) in line
-                        and os.path.join(runtime.settings.Domme._image_folder, line[0]) == runtime._current_image_path
+                        and os.path.join(get_settings().Domme._image_folder, line[0]) == response["current_image"]
                     ):
                         return True
                 return False
@@ -786,227 +783,251 @@ class Dispatch(metaclass=DispatchMeta):
 
     @validate_params
     @staticmethod
-    def Edge(runtime, arg0):
-        # TODO: @Edge logic will need to handle transitioning state from "edge" to "normal_hold", "long_hold", "extreme_hold"
-        pass
+    def Edge(*args):
+        runtime = get_runtime()
+        if runtime._state != "stroking":
+            return RuntimeErr("@Edge can only be called when the sub is stroking", *runtime.get_position()).throw()
+        get_settings()._edge_start = datetime.now()
+        runtime._state = "edging"
+        runtime.edges += 1
+
+        hold = None
+        resolution = None
+        ruin_taunts = False
+
+        if len(args) > 0:
+            params = [arg.Evaluate().lower() for arg in args]
+            params.append(None)
+            hold = [param for param in ("extremehold", "longhold", "hold", None) if param in params][0]
+            resolution = [param for param in ("ruin", "orgasm", None) if param in params][0]
+
+            if "ruintaunts" in params and "ruin" not in params:
+                return SyntaxErr(
+                    "RuinTaunts is only valid when 'Ruin' is also passed as a paramter to @Edge",
+                    *runtime.get_position(),
+                ).throw()
+            elif "ruintaunts" in params:
+                ruin_taunts = True
+
+        script_path = random_script(
+            os.path.join(APPLICATION_ROOT, "Scripts", get_settings().current_personality, "Stroke\\Edge")
+        )
+        handler = EdgeTauntCycle(script_path, pending_hold=hold, pending_res=resolution, ruin_taunts=ruin_taunts)
+        handler.start()
 
     @validate_params
     @staticmethod
-    def EdgeHold(runtime, arg0=None):
+    def EdgeHold(arg0=None):
         # If present, we map the parameter to user-configured min/max hold time settings and constrain it to those values.
+        # To implement, we call the parameterized form of @Edge
         if arg0:
             duration = convert_string_time_to_seconds(arg0.Evaluate())
             if duration == "invalid units":
                 ValueErr("Invalid parameter for @EdgeHold", *arg0.get_position()).throw()
-            if duration < runtime.settings.Sub.max_edge_hold_time:
+            if duration < get_settings().Sub.max_edge_hold_time:
                 Dispatch.Edge(StringToken(*arg0.get_position(), "Hold"))
-            if (
-                duration > runtime.settings.Sub.max_edge_hold_time
-                and duration < runtime.settings.Sub.min_extreme_hold_time
-            ):
+            if duration > get_settings().Sub.max_edge_hold_time and duration < get_settings().Sub.min_extreme_hold_time:
                 Dispatch.Edge(StringToken(*arg0.get_position(), "LongHold"))
-            if duration > runtime.settings.Sub.max_extreme_hold_time:
+            if duration > get_settings().Sub.max_extreme_hold_time:
                 Dispatch.Edge(StringToken(*arg0.get_position(), "ExtremeHold"))
         else:
-            Dispatch.Edge(StringToken(*runtime.get_position(), "Hold"))
+            Dispatch.Edge(StringToken(*get_runtime().get_position(), "Hold"))
         # Done
 
     @validate_params
     @staticmethod
-    def EdgeHoldKeyword(runtime):
+    def EdgeHoldKeyword():
         return Dispatch.vocab("#EdgeHold")
         # Done
 
     @validate_params
     @staticmethod
-    def EdgeMode(runtime, arg0, arg1):
+    def EdgeMode(arg0, arg1):
         mode = arg0.Evaluate().lower()
         if mode not in ["video", "goto"]:
             ValueErr(
                 "Invalid parameter: first argument to @EdgeMode must be one of 'video' or 'goto'", *arg0.get_position()
             )
-        runtime.mode = CustomMode(runtime, mode, arg1, "edge")
+        CustomMode(mode, arg1, "edge")
 
     @validate_params
     @staticmethod
-    def Edging(runtime):
-        return runtime._taunt_context == "edge"
+    def Edging():
+        return get_runtime()._state == "edging"
         # Done
 
     @validate_params
     @staticmethod
-    def EmoteMessage(runtime):
-        runtime.emote_message = True
+    def EmoteMessage():
+        get_runtime().emote_message = True
         # Done
 
+    # BOOKMARK
     @validate_params
     @staticmethod
-    def End(runtime):
-        if runtime._context == "link" and runtime._bookmark_link:
-            runtime._bookmark_link = False
-            runtime.pointer += 1
-            # TODO: select module and @CallReturn it
-            return
-        if runtime._context == "module" and runtime._bookmark_module:
-            runtime._bookmark_module = False
-            runtime.pointer += 1
-            # What do we do if runtime.tease_time <= 0?
-            # To align with our policy of respecting user settings over scripts when there is a conflict, we should
-            # probably end the tease
-            # TODO: advance interpreter pointer? and select link and @CallReturn it
-            return
-        path = runtime.get_position[2]  # grab the path for the current script
-        runtime.pointer = 0  # move to the top of the stack
-        found_start = False
-        while runtime.pointer <= len(runtime.blocks) - 1:
-            if runtime.blocks[runtime.pointer].get_position()[2] == path:
-                if not found_start:
-                    found_start = True  # set True the first time we encounter a block from the script we're removing
-                runtime.blocks.pop(runtime.pointer)
-            elif found_start:
-                break  # we've found the end of the script file we're removing, and the pointer is in the right position
+    def End():
+        runtime = get_runtime()
+        personality_path = os.path.join(APPLICATION_ROOT, "Scripts", get_settings().current_personality)
+        popped_frame = runtime._stack.pop()
+        if len(runtime._stack) > 0:
+            runtime._current_frame = runtime._stack[-1]
+            return runtime.run()
+        context = popped_frame.context
+
+        if context == "taunt":
+            return RuntimeErr("@End is not valid inside a taunt script", *runtime.get_position()).throw()
+        elif context == "start":
+            runtime.call(random_script(os.path.join(personality_path, "Stroke\\Link")))
+        elif context == "link":
+            if runtime._bookmark_module is not None:
+                frame, pointer = runtime._bookmark_module
+                runtime._bookmark_module = None
+                frame.pointer = pointer
+                runtime._stack.append(frame)
+                runtime._current_frame = frame
+                runtime.run()
+            elif runtime._next_module is not None:
+                runtime.call(runtime._next_module)
+                runtime._next_module = None
             else:
-                runtime.pointer += 1  # we haven't found the start of the script yet
-        match runtime._context:
-            case "start":
-                runtime._context = "link"
-                # TODO: select link file and @Call it
-            case "link":
-                runtime._context = "module"
-                # TODO: select module file and @Call it
-            case "module":
-                if runtime.tease_time <= 0:
-                    # TODO: select end script and @Call it
-                    return
-                runtime._context = "link"
-                # TODO: select link file and @Call it
-            case "interrupt":
-                runtime._context = runtime._previous_context
-                # here, the stack should handle resuming where we left off.
-        # NFI
+                runtime.call(random_script(os.path.join(personality_path, "Modules")))
+        elif context in ["module", "custom"]:
+            if not runtime._finish_tease:
+                runtime.call(random_script(os.path.join(personality_path, "Stroke\\End")))
+            else:
+                runtime.round += 1
+                if runtime._bookmark_link is not None:
+                    frame, pointer = runtime._bookmark_link
+                    runtime._bookmark_link = None
+                    frame.pointer = pointer
+                    runtime._stack.append(frame)
+                    runtime._current_frame = frame
+                    runtime.run()
+                elif runtime._next_link is not None:
+                    runtime.call(runtime._next_link)
+                    runtime._next_link = None
+                else:
+                    runtime.call(random_script(os.path.join(personality_path, "Stroke\\Link")))
+        elif context == "end":
+            Bus.emit("end_tease")
+        # Done
 
     @validate_params
     @staticmethod
-    def EndTease(runtime):
+    def EndTease():
         Bus.emit("end_tease")
         # Done
 
     @validate_params
     @staticmethod
-    def ExpireFlag(runtime, arg0, arg1):
+    def ExpireFlag(arg0, arg1):
         filename = arg0.Evaluate()
         if not is_valid_filename(filename):
             ValueErr("Invalid filename specified for @ExpireFlag", *arg0.get_position()).throw()
         time = convert_string_time_to_seconds(arg1.Evaluate())
         date = datetime.now() + timedelta(seconds=time)
-        with open(os.path.join(runtime.var_path, filename), "w") as f:
-            f.write(date)
+
+        flags = getattr(get_settings(), "Flags", {}).setdefault(get_settings().current_personality, {})
+        # ExpireFlag traditionally stores a date, we will store it as a dict key for backwards logical compat later,
+        # but since flags is usually a list, we just append it for now as a simple flag:
+        if isinstance(flags, list):
+            if filename not in flags:
+                flags.append(filename)
+        elif isinstance(flags, dict):
+            flags[filename] = string_from_date(date)
+
+        Bus.emit("save_settings")
         # Done
 
     @validate_params
     @staticmethod
-    def ExtremeHold(runtime):
-        pass
-
-    @validate_params
-    @staticmethod
-    def ExtremeHoldKeyword(runtime):
+    def ExtremeHold():
         return Dispatch.vocab("#ExtremeHold")
         # Done
 
     @validate_params
     @staticmethod
-    def ExtremeTaunt(runtime):
-        return runtime.context == "extreme_hold"
+    def ExtremeHoldKeyword():
+        return Dispatch.vocab("#ExtremeHold")
+        # NFI - Create this vocab file
+
+    @validate_params
+    @staticmethod
+    def ExtremeTaunt():
+        return get_runtime()._state == "extreme_hold"
         # Done
 
     @validate_params
     @staticmethod
-    def FirstRound(runtime):
-        return runtime.round == 1
+    def FirstRound():
+        return get_runtime().round == 1
         # Done
 
     @validate_params
     @staticmethod
-    def Flag(runtime, arg0):
+    def Flag(arg0):
         flag = arg0.Evaluate()
-        if flag in runtime._temp_flags:
+        if flag in get_runtime()._temp_flags:
             return True
-        return os.path.isfile(os.path.join(runtime.flag_path, flag))
+        flags = getattr(get_settings(), "Flags", {}).setdefault(get_settings().current_personality, [])
+        return flag in flags
         # Done
 
     @validate_params
     @staticmethod
-    def FlagOr(runtime, *args):
+    def FlagOr(*args):
         return any([Dispatch.Flag(arg) for arg in args])
         # Done
 
     @validate_params
     @staticmethod
-    def FollowUp(runtime, arg0, arg1):
+    def FollowUp(arg0, arg1):
         if random.randint(0, 100) < arg0.Evaluate():
-            runtime.generic_visit(arg1)
+            get_runtime().generic_visit(arg1)
         # Done
 
     @validate_params
     @staticmethod
-    def GeneralTime(runtime):
+    def GeneralTime():
         return Dispatch.vocab("#GeneralTime")
         # Done
 
     @validate_params
     @staticmethod
-    def GoodAfternoonSub(runtime):
+    def GoodAfternoonSub():
         return Dispatch.vocab("#GoodAfternoonSub")
         # Done
 
     @validate_params
     @staticmethod
-    def GoodEveningSub(runtime):
+    def GoodEveningSub():
         return Dispatch.vocab("#GoodEveningSub")
         # Done
 
     @validate_params
     @staticmethod
-    def GoodMood(runtime):
-        return runtime.domme_mood >= runtime.settings.Domme.mood_index_max
+    def GoodMood():
+        return get_runtime().domme_mood >= get_settings().Domme.mood_index_max
         # Done
 
     @validate_params
     @staticmethod
-    def GoodMorningSub(runtime):
+    def GoodMorningSub():
         return Dispatch.vocab("#GoodMorningSub")
         # Done
 
     @register("Goto")
     @validate_params
     @staticmethod
-    def Goto(runtime, arg0):
-        headline = arg0.Evaluate()
-        path = arg0.get_position()[2]
-        looped = False
-        while True:
-            block = runtime.blocks[runtime.pointer]
-            if not isinstance(block, HeadlineToken):
-                if block.get_position()[2] == path:
-                    runtime.pointer += 1
-                elif looped:
-                    SyntaxErr(f"@Goto headline ({headline}) not found", *runtime.get_position()).throw()
-                else:
-                    runtime.pointer = 0
-                    looped = True
-                    while runtime.blocks[runtime.pointer].get_position()[2] != path:
-                        runtime.pointer += 1
-            else:
-                if block.value == headline:
-                    break
+    def Goto(arg0):
+        get_runtime().goto(arg0.Evaluate())
         # Done
 
     @validate_params
     @staticmethod
-    def GotoDommeApathy(runtime):
+    def GotoDommeApathy():
         level = ""
-        match runtime.settings.Domme.ApathyLevel:
+        match get_settings().Domme.ApathyLevel:
             case 1:
                 level = "ApathyLevel1"
             case 2:
@@ -1017,15 +1038,15 @@ class Dispatch(metaclass=DispatchMeta):
                 level = "ApathyLevel4"
             case 5:
                 level = "ApathyLevel5"
-        Dispatch.Goto(StringToken(*runtime.get_position(), level))
+        get_runtime().goto(level)
 
     # Done
 
     @validate_params
     @staticmethod
-    def GotoDommeLevel(runtime):
+    def GotoDommeLevel():
         level = ""
-        match runtime.settings.Domme.Level:
+        match get_settings().Domme.Level:
             case 1:
                 level = "DommeLevel1"
             case 2:
@@ -1036,121 +1057,131 @@ class Dispatch(metaclass=DispatchMeta):
                 level = "DommeLevel4"
             case 5:
                 level = "DommeLevel5"
-        Dispatch.Goto(StringToken(*runtime.get_position(), level))
+        get_runtime().goto(level)
 
     # Done
 
     @validate_params
     @staticmethod
-    def GotoDommeOrgasm(runtime):
-        Dispatch.Goto(StringToken(*runtime.get_position(), runtime.settings.Domme.allows_orgasms_string))
+    def GotoDommeOrgasm():
+        get_runtime().goto(get_settings().Domme.allows_orgasms_string)
 
     # Done
 
     @validate_params
     @staticmethod
-    def GotoDommeRuin(runtime):
-        Dispatch.Goto(StringToken(*runtime.get_position(), runtime.settings.Domme.ruins_orgasm_string))
+    def GotoDommeRuin():
+        get_runtime().goto(get_settings().Domme.ruins_orgasms_string)
 
     # Done
 
     @validate_params
     @staticmethod
-    def GreetSub(runtime):
+    def GreetSub():
         return Dispatch.vocab("#GreetSub")
         # Done
 
     @validate_params
     @staticmethod
-    def Group(runtime, arg0):
+    def Group(arg0):
         members = arg0.Evaluate().split("")
-        return all([member in runtime._present for member in members])
+        return all([member in get_runtime()._present for member in members])
         # Done
 
     @validate_params
     @staticmethod
-    def GroupContains(runtime, arg0):
+    def GroupContains(arg0):
         members = arg0.Evaluate().split("")
-        return any([member in runtime._present for member in members])
+        return any([member in get_runtime()._present for member in members])
         # Done
 
     @validate_params
     @staticmethod
-    def HentaiImageCount(runtime):
-        if os.path.isdir(runtime.settings.hentai_images):
-            return len(os.listdir(runtime.settings.hentai_images))
+    def HentaiImageCount():
+        if os.path.isdir(get_settings().hentai_images):
+            return len(os.listdir(get_settings().hentai_images))
         return 0
         # Done
 
     @validate_params
     @staticmethod
-    def HideChatMessage(runtime):
-        runtime.hide_chat_message = True
+    def HideChatMessage():
+        get_runtime()._hide_chat = True
         # Done
 
     @validate_params
     @staticmethod
-    def HoldTaunt(runtime):
-        return runtime.context == "normal_hold"
+    def HoldTaunt():
+        return get_runtime()._state == "holding"
         # Done
 
     @validate_params
     @staticmethod
-    def HoldingTheEdge(runtime):
-        return runtime.holding_state
+    def HoldingTheEdge():
+        return get_runtime()._state == "holding"
         # Done
 
     @validate_params
     @staticmethod
-    def ImageBarOff(runtime, arg0, arg1):
-        pass
+    def ImageBarOff(arg0, arg1=None):
+        num = int(arg0.Evaluate())
+        Bus.emit("hide_image_bar", num)
 
     @validate_params
     @staticmethod
-    def ImageBarOn(runtime, arg0, arg1, arg2, arg3, arg4, arg5):
-        pass
+    def ImageBarOn(arg0, arg1, arg2, arg3, arg4, arg5=None):
+        num = int(arg0.Evaluate())
+        x = int(arg1.Evaluate())
+        y = int(arg2.Evaluate())
+        w = int(arg3.Evaluate())
+        h = int(arg4.Evaluate())
+        path = str(arg5.Evaluate()) if arg5 else ""
+        Bus.emit("show_image_bar", num, x, y, w, h, path)
 
     @validate_params
     @staticmethod
-    def ImageTag(runtime, *args):
+    def ImageTag(*args):
         Bus.emit("show_image_tag", [arg.Evaluate() for arg in args])
         # Done
 
     @validate_params
     @staticmethod
-    def ImageTagAny(runtime, *args):
+    def ImageTagAny(*args):
         Bus.emit("show_image_tag_any", [arg.Evaluate() for arg in args])
         # Done
 
     @validate_params
     @staticmethod
-    def InChastity(runtime):
-        return runtime.in_chastity
+    def InChastity():
+        return get_runtime().in_chastity
         # Done
 
     @validate_params
     @staticmethod
-    def IncreaseOrgasmChance(runtime):
-        runtime.settings.Domme.allows_orgasms += 1
-        # Done
+    def IncreaseOrgasmChance():
+        get_settings().Domme.allows_orgasms += 1
+        # NFI - Add settings change request popup?
 
     @validate_params
     @staticmethod
-    def IncreaseRuinChance(runtime):
-        runtime.settings.Domme.ruins_orgasms += 1
-        # Done
+    def IncreaseRuinChance():
+        get_settings().Domme.ruins_orgasms += 1
+        # NFI - Add settings change request popup?
 
     @validate_params
     @staticmethod
-    def InputVar(runtime, arg0):
+    def InputVar(arg0):
         filename = arg0.Evaluate()
         if not is_valid_filename(filename):
             ValueErr("Invalid filename specified for @InputVar", *arg0.get_position()).throw()
 
-        def input_var_handler(runtime, sender, message):
+        from message_classes import UserMessage
+
+        def input_var_handler(message):
             if isinstance(message, UserMessage):
-                with open(os.path.join(runtime.var_path, filename), "w") as f:
-                    f.write(message.text)
+                vars_dict = getattr(get_settings(), "Variables", {}).setdefault(get_settings().current_personality, {})
+                vars_dict[filename] = message.text
+                Bus.emit("save_settings")
                 Bus.unsub("new_message", input_var_handler)
 
         Bus.sub("new_message", input_var_handler)
@@ -1158,58 +1189,93 @@ class Dispatch(metaclass=DispatchMeta):
 
     @validate_params
     @staticmethod
-    def Interrupt(runtime, arg0):
-        if runtime.interrupt_state:
-            runtime._previous_context = runtime._context
-            runtime._context = "interrupt"
-            Dispatch.CallReturn(arg0)
+    def Interrupt(arg0, arg1=None):
+        if get_runtime()._interrupts_enabled:
+            get_runtime()._worship_mode = False
+            if os.path.isfile(
+                os.path.join(
+                    APPLICATION_ROOT,
+                    "Scripts",
+                    get_settings().current_personality,
+                    "Interrupt",
+                    arg0.Evaluate() + ".txt",
+                )
+            ):
+                get_runtime().call_return(arg0.Evaluate(), arg1.Evaluate() if arg1 else None)
+            else:
+                RuntimeErr(
+                    f"Script file {arg0.Evaluate()} not found for @Interrupt call", *get_runtime().get_position()
+                ).throw()
         # Done
 
     @validate_params
     @staticmethod
-    def InterruptLongEdge(runtime):
-        pass
-
-    @validate_params
-    @staticmethod
-    def Interrupts(runtime, arg0):
-        runtime.settings.interrupt_state = arg0.Evaluate()
+    def InterruptLongEdge():
+        runtime = get_runtime()
+        if runtime._state != "edging":
+            return
+        settings = get_settings()
+        if not settings.Sub.long_edge_interrupts:
+            return
+        if settings._edge_start is None:
+            return
+        delta = datetime.now() - settings._edge_start
+        if delta.seconds > settings.Sub.long_edge_threshold:
+            # The line itself handles chat output; we just terminate the cycle
+            handler = runtime._current_frame.handler
+            if handler is not None:
+                handler.interrupt_long_edge()
         # Done
 
     @validate_params
     @staticmethod
-    def LastJoined(runtime):
-        return runtime.last_joined
+    def Interrupts(arg0):
+        get_runtime()._interrupts_enabled = arg0.Evaluate()
         # Done
 
     @validate_params
     @staticmethod
-    def LikeBlogImage(runtime):
-        pass
+    def LastJoined():
+        return get_runtime().last_joined
+        # Done
 
     @validate_params
     @staticmethod
-    def LikedImageCount(runtime):
+    def LikeBlogImage():
+        response = {"current_image": None}
+        Bus.emit("get_current_image", response=response)
+        if os.path.isfile(response["current_image"]):
+            shutil.move(
+                response["current_image"],
+                os.path.join(APPLICATION_ROOT, "\\LikedImages\\", os.path.basename(response["current_image"])),
+            )
+        # Done
+
+    @validate_params
+    @staticmethod
+    def LikedImageCount():
         path = os.path.join(APPLICATION_ROOT, "\\Liked Images\\")
         return sum([1 for _ in os.listdir(path)])
         # Done
 
     @validate_params
     @staticmethod
-    def LockMedia(runtime):
-        runtime.media_locked = True
+    def LockMedia():
+        Bus.emit("lock_media")
         # Done
 
     @validate_params
     @staticmethod
-    def LongEdge(runtime):
+    def LongEdge():
+        if not get_settings().Sub.long_edge_interrupts:
+            return False
         threshold = (
-            runtime.settings.Sub.avg_edge_time
-            if runtime.settings.Sub.use_avg_as_threshold
-            else runtime.settings.Sub.long_edge_threshold * 60
+            get_settings().Sub.avg_edge_time
+            if get_settings().Sub.use_avg_as_threshold
+            else get_settings().Sub.long_edge_threshold * 60
         )
-        if runtime.settings._edge_start is not None:
-            delta_time = datetime.now() - runtime.settings._edge_start
+        if get_settings()._edge_start is not None:
+            delta_time = datetime.now() - get_settings()._edge_start
             if delta_time.seconds > threshold:
                 return True
         return False
@@ -1217,49 +1283,60 @@ class Dispatch(metaclass=DispatchMeta):
 
     @validate_params
     @staticmethod
-    def LongHold(runtime):
+    def LongHold():
         return Dispatch.vocab("#LongHold")
         # Done
 
     @validate_params
     @staticmethod
-    def LongTaunt(runtime):
-        return runtime.context == "long_hold"
+    def LongTaunt():
+        return get_runtime()._current_frame.context == "long_hold"
         # Done
 
     @validate_params
     @staticmethod
-    def LoopAnswer(runtime):
-        runtime._loop_answer = True
+    def LoopAnswer():
+        pass  # This command is implemented as a no-op because the interpreter is already in waiting_for_input
+        # state.   No state change is needed for the state to persist.  The intent of this command is simply
+        # to notify the interpreter *not* to resolve the MultipleChoiceBlock
         # Done
 
     @validate_params
     @staticmethod
-    def Month(runtime, arg0):
+    def Month(arg0):
         return arg0.Evaluate() == datetime.now().month
         # Done
 
     @validate_params
     @staticmethod
-    def Mood(runtime, arg0):
-        return runtime.domme_mood == arg0.Evaluate()
+    def Mood(arg0):
+        return get_runtime().domme_mood == arg0.Evaluate()
         # Done
 
     @validate_params
     @staticmethod
-    def Morning(runtime):
+    def Morning():
         return datetime.now().hour > 6 and datetime.now().hour < 12
         # Done
 
     @validate_params
     @staticmethod
-    def MultipleEdges(runtime, arg0, arg1, arg2):
-        pass
+    def MultipleEdges(arg0, arg1, arg2):
+        if arg2 is not None:
+            if random.randint(0, 100) > arg2.Evaluate():
+                return
+        runtime = get_runtime()
+        if runtime._state != "edging":
+            return RuntimeErr("@MultipleEdges is only valid when preceded by @Edge", *arg0.get_position()).throw()
+        runtime._current_frame.multiple_edges = arg0.Evaluate()
+        if arg1 is not None:
+            runtime._current_frame.multiple_edges_interval = arg1.Evaluate()
+        # Done
 
     @validate_params
     @staticmethod
-    def NewContactSlideshow(runtime, arg0):
-        dir = runtime.settings.contact_namespace(arg0.Evaluate(), "_image_folder")
+    def NewContactSlideshow(arg0):
+        dir = get_settings().contact_namespace(arg0.Evaluate(), "_image_folder")
         if os.path.isdir(dir):
             folders = [f for f in os.listdir(dir) if os.path.isdir(os.path.join(dir, f))]
             if len(folders) > 0:
@@ -1271,15 +1348,12 @@ class Dispatch(metaclass=DispatchMeta):
 
     @validate_params
     @staticmethod
-    def NewDommeSlideshow(runtime):
-        dir = runtime.settings.Domme._image_folder
+    def NewDommeSlideshow():
+        dir = get_settings().Domme._image_folder
         if os.path.isdir(dir):
             folders = [f for f in os.listdir(dir) if os.path.isdir(os.path.join(dir, f))]
             if len(folders) > 0:
-                folder = folders[random.randint[0, len(folders) - 1]]
-                runtime._slides_dir = folder
-                slides = [f for f in os.listdir(os.path.join(dir, folder)) if is_image_file(f)]
-                runtime._slides = [os.path.join(dir, folder, f) for f in slides]
+                folder = folders[random.randint(0, len(folders) - 1)]
                 Bus.emit("new_slideshow", folder)
         else:
             ValueErr("Invalid directory passed to @NewDommeSlideshow", 0, 0, "").throw()
@@ -1287,41 +1361,41 @@ class Dispatch(metaclass=DispatchMeta):
 
     @validate_params
     @staticmethod
-    def Night(runtime):
+    def Night():
         return datetime.now().hour > 19 or datetime.now().hour < 6
         # Done
 
     @validate_params
     @staticmethod
-    def NoMode(runtime, arg0, arg1):
+    def NoMode(arg0, arg1):
         mode = arg0.Evaluate().lower()
         if mode not in ["video", "goto"]:
             ValueErr(
                 "Invalid parameter: first argument to @NoMode must be one of 'video' or 'goto'", *arg0.get_position()
             )
-        runtime.mode = CustomMode(runtime, mode, arg1, "no")
+        CustomMode(mode, arg1, "no")
         # Done
 
     @validate_params
     @staticmethod
-    def Null(runtime):
+    def Null():
         return ""
         # Done
 
     @validate_params
     @staticmethod
-    def NullNextDommeImage(runtime):
-        runtime.null_domme_image = True
+    def NullNextDommeImage():
+        get_runtime()._null_domme_image = True
         # Done
 
     @validate_params
     @staticmethod
-    def OrgasmAllow(runtime):
-        # What happens in this case if orgasm_restricted is True?
-        # Executive decision: This is a problem with the script, not the interpreter, so we throw an error and die.
+    def OrgasmAllow():
+        runtime = get_runtime()
         if not runtime.orgasm_restricted:
             runtime.orgasm_allowed = True
-            Dispatch.Goto(StringToken(*runtime.get_position(), "Orgasm Allow"))
+            runtime.settings().Sub.last_orgasm_date = string_from_date(datetime.now())
+            runtime.goto("Orgasm Allow")
         else:
             RuntimeErr(
                 "@OrgasmAllow cannot be called while @OrgasmRestricted is in effect.", *runtime.get_position()
@@ -1330,51 +1404,53 @@ class Dispatch(metaclass=DispatchMeta):
 
     @validate_params
     @staticmethod
-    def OrgasmAllowed(runtime):
-        return runtime.orgasm_allowed
+    def OrgasmAllowed():
+        return get_runtime().orgasm_allowed
         # Done
 
     @validate_params
     @staticmethod
-    def OrgasmDenied(runtime):
-        return runtime.orgasm_denied
+    def OrgasmDenied():
+        return get_runtime().orgasm_denied
         # Done
 
     @validate_params
     @staticmethod
-    def OrgasmDeny(runtime):
-        runtime.orgasm_denied = True
-        Dispatch.Goto(StringToken(*runtime.get_position(), "Orgasm Deny"))
+    def OrgasmDeny():
+        get_runtime().orgasm_denied = True
+        get_runtime().goto("Orgasm Deny")
         # Done
 
     @validate_params
     @staticmethod
-    def OrgasmLockDate(runtime):
-        return runtime.settings.orgasm_lock_date
+    def OrgasmLockDate():
+        return get_settings().orgasm_lock_date
         # Done
 
     @validate_params
     @staticmethod
-    def OrgasmRestricted(runtime):
-        return runtime.orgasm_restricted
+    def OrgasmRestricted():
+        return get_runtime().orgasm_restricted
         # Done
 
     @validate_params
     @staticmethod
-    def OrgasmRuin(runtime):
+    def OrgasmRuin():
+        runtime = get_runtime()
         runtime.orgasm_ruined = True
-        Dispatch.Goto(StringToken(*runtime.get_position(), "Orgasm Ruin"))
+        runtime.settings.Sub.last_ruin_date = string_from_date(datetime.now())
+        runtime.goto("Orgasm Ruin")
         # Done
 
     @validate_params
     @staticmethod
-    def OrgasmRuined(runtime):
-        return runtime.orgasm_ruined
+    def OrgasmRuined():
+        return get_runtime().orgasm_ruined
         # Done
 
     @validate_params
     @staticmethod
-    def PaceFastest(runtime):
+    def PaceFastest():
         pace = {}
         Bus.emit("get_metro_pace", pace)
         return pace["pace"] == 120
@@ -1382,7 +1458,7 @@ class Dispatch(metaclass=DispatchMeta):
 
     @validate_params
     @staticmethod
-    def PaceSlowest(runtime):
+    def PaceSlowest():
         pace = {}
         Bus.emit("get_metro_pace", pace)
         return pace["pace"] == 30
@@ -1390,53 +1466,55 @@ class Dispatch(metaclass=DispatchMeta):
 
     @validate_params
     @staticmethod
-    def PauseVideo(runtime):
+    def PauseVideo():
         Bus.emit("pause_video")
         # Done
 
     @validate_params
     @staticmethod
-    def PetName(runtime):
-        if runtime.petname_temp != "":
-            return runtime.petname_temp
+    def PetName():
+        runtime = get_runtime()
+        if getattr(runtime, "_petname_temp", None) is not None:
+            return runtime._petname_temp
         names = []
         mood = runtime.domme_mood
-        if mood <= runtime.settings.Domme.MoodIndexMin:
-            names = runtime.settings.Domme.BadMoodPetNames
-        if mood > runtime.settings.Domme.MoodIndexMin and mood < runtime.settings.Domme.MoodIndexMax:
-            names = runtime.settings.Domme.NeutralMoodPetNames
-        if mood >= runtime.settings.Domme.MoodIndexMax:
-            names = runtime.settings.Domme.GoodMoodPetNames
-        return names[random.randint(0, len(names) - 1)]
+        if mood <= get_settings().Domme.mood_index_min:
+            names = get_settings().Domme._bad_mood_pet_names
+        if mood > get_settings().Domme.mood_index_min and mood < get_settings().Domme.mood_index_max:
+            names = get_settings().Domme._neutral_mood_pet_names
+        if mood >= get_settings().Domme.mood_index_max:
+            names = get_settings().Domme._good_mood_pet_names
+        return random.choice(names)
         # Done
 
     @validate_params
     @staticmethod
-    def PetNameReset(runtime):
-        runtime.petname_temp = ""
+    def PetNameReset():
+        get_runtime()._petname_temp = None
         # Done
 
     @validate_params
     @staticmethod
-    def PetNameTemp(runtime, arg0):
-        runtime.petname_temp = arg0.Evaluate()
+    def PetNameTemp(arg0):
+        get_runtime()._petname_temp = arg0.Evaluate()
         # Done
 
     @validate_params
     @staticmethod
-    def PlayAudio(runtime, arg0):
+    def PlayAudio(arg0):
         Bus.emit("play_audio", arg0.Evaluate())
         # Done
 
     @validate_params
     @staticmethod
-    def PlayAudioLoop(runtime, arg0, arg1):
+    def PlayAudioLoop(arg0, arg1):
         Bus.emit("play_audio_loop", arg0.Evaluate(), arg1.Evaluate())
         # Done
 
     @validate_params
     @staticmethod
-    def PlayAvoidTheEdge(runtime):
+    def PlayAvoidTheEdge():
+        runtime = get_runtime()
         Dispatch.CallReturn(
             StringToken(
                 *runtime.get_position(), os.path.join(runtime.game_path, "\\Avoid The Edge\\Avoid The Edge.txt")
@@ -1446,7 +1524,8 @@ class Dispatch(metaclass=DispatchMeta):
 
     @validate_params
     @staticmethod
-    def PlayCensorshipSucks(runtime):
+    def PlayCensorshipSucks():
+        runtime = get_runtime()
         Dispatch.CallReturn(
             StringToken(
                 *runtime.get_position(), os.path.join(runtime.game_path, "\\Censorship Sucks\\Censorship Sucks.txt")
@@ -1456,25 +1535,26 @@ class Dispatch(metaclass=DispatchMeta):
 
     @validate_params
     @staticmethod
-    def PlayDommeGenreVideo(runtime, arg0):
+    def PlayDommeGenreVideo(arg0):
         genre = arg0.Evaluate()
-        dir = runtime.settings.domme_namespace(genre + "_video")
+        dir = get_settings().domme_namespace(genre + "_video")
         video = random_video(dir)
         Dispatch._registry["PlayVideo"](StringToken(*arg0.get_position(), video))
         # Done
 
     @validate_params
     @staticmethod
-    def PlayGenreVideo(runtime, arg0):
+    def PlayGenreVideo(arg0):
         genre = arg0.Evaluate()
-        dir = getattr(runtime.settings, genre + "_video")
+        dir = getattr(get_settings(), genre + "_video")
         video = random_video(dir)
         Dispatch._registry["PlayVideo"](StringToken(*arg0.get_position(), video))
         # Done
 
     @validate_params
     @staticmethod
-    def PlayRedLightGreenLight(runtime):
+    def PlayRedLightGreenLight():
+        runtime = get_runtime()
         Dispatch.CallReturn(
             StringToken(
                 *runtime.get_position(),
@@ -1485,7 +1565,8 @@ class Dispatch(metaclass=DispatchMeta):
 
     @validate_params
     @staticmethod
-    def PlayRiskyPick(runtime):
+    def PlayRiskyPick():
+        runtime = get_runtime()
         if os.path.isfile(os.path.join(runtime.game_path, "\\Risky Pick Replacement\\Risky Pick 2026.txt")):
             Dispatch.CallReturn(
                 StringToken(
@@ -1504,19 +1585,19 @@ class Dispatch(metaclass=DispatchMeta):
     @register("PlayVideo")
     @validate_params
     @staticmethod
-    def PlayVideo(runtime, arg0=None, arg1=None):
+    def PlayVideo(arg0=None, arg1=None):
         if arg0 is None:
             files = []
             folders = [
-                runtime.settings.blowjob_video,
-                runtime.settings.ch_video,
-                runtime.settings.joi_video,
-                runtime.settings.hardcore_video,
-                runtime.settings.softcore_video,
-                runtime.settings.lesbian_video,
-                runtime.settings.femdom_video,
-                runtime.settings.femsub_video,
-                runtime.settings.general_video,
+                get_settings().blowjob_video,
+                get_settings().ch_video,
+                get_settings().joi_video,
+                get_settings().hardcore_video,
+                get_settings().softcore_video,
+                get_settings().lesbian_video,
+                get_settings().femdom_video,
+                get_settings().femsub_video,
+                get_settings().general_video,
             ]
             for folder in [folder for folder in folders if folder != "" and os.path.isdir(folder)]:
                 files.extend(os.listdir(folder))
@@ -1539,13 +1620,13 @@ class Dispatch(metaclass=DispatchMeta):
 
     @validate_params
     @staticmethod
-    def RT(runtime, *args):
+    def RT(*args):
         return random.choice(args).Evaluate()
         # Done
 
     @validate_params
     @staticmethod
-    def Random(runtime, arg0, arg1, arg2=None):
+    def Random(arg0, arg1, arg2=None):
         num = random.randint(arg0.Evaluate(), arg1.Evaluate())
         if arg2 is not None:
             return round(num / arg2.Evaluate()) * arg2.Evaluate()
@@ -1553,246 +1634,253 @@ class Dispatch(metaclass=DispatchMeta):
 
     @validate_params
     @staticmethod
-    def RandomContact(runtime):
+    def RandomContact():
+        runtime = get_runtime()
         contact = random.choice(runtime._present)
-        runtime.active_domme = runtime.settings.contact_namespace(contact, "name")
+        runtime.active_domme = get_settings().contact_namespace(contact, "name")
         # Done
 
     @validate_params
     @staticmethod
-    def RapidText(runtime, arg0):
-        runtime.rapid_text = arg0.Evaluate()
+    def RapidText(arg0):
+        get_runtime().rapid_text = arg0.Evaluate()
         # Done
 
     @validate_params
     @staticmethod
-    def RarelyAllowsOrgasm(runtime):
-        return runtime.settings.Domme.allows_orgasms == 4
+    def RarelyAllowsOrgasm():
+        return get_settings().Domme.allows_orgasms == 4
         # Done
 
     @validate_params
     @staticmethod
-    def RarelyRuinsOrgasm(runtime):
-        return runtime.settings.Domme.ruins_orgasms == 4
+    def RarelyRuinsOrgasm():
+        return get_settings().Domme.ruins_orgasms == 4
         # Done
 
     @validate_params
     @staticmethod
-    def RemoveContact(runtime, arg0):
-        runtime._present.remove(arg0.Evaluate())
-        if not runtime.hide_chat:
-            Bus.emit("new_message", SystemMessage(f"{runtime.settings.id_to_name(arg0.Evaluate())} has logged out."))
+    def RemoveContact(arg0):
+        Bus.emit("remove_entity", arg0.Evaluate())
         # Done
 
     @validate_params
     @staticmethod
-    def RemoveDomme(runtime):
-        runtime._present.remove("D")
-        if not runtime.hide_chat:
-            Bus.emit("new_message", SystemMessage(f"{runtime.settings.Domme.name} has logged out."))
+    def RemoveDomme():
+        Bus.emit("remove_entity", "D")
         # Done
 
     @validate_params
     @staticmethod
-    def RemoveEdgeHoldTime(runtime, arg0=None, arg1=None):
+    def RemoveEdgeHoldTime(arg0=None, arg1=None):
+        runtime = get_runtime()
+        handler = runtime._current_frame.handler
         if arg0 is None and arg1 is None:
-            min = runtime.settings.Sub.min_edge_hold_time
-            max = runtime.settings.Sub.max_edge_hold_time
-            runtime.edge_hold_time -= random.randint(min, max)
+            min = get_settings().Sub.min_edge_hold_time
+            max = get_settings().Sub.max_edge_hold_time
+            handler.hold_timer.setInterval(handler.hold_timer.remainingTime() - random.randint(min, max) * 1000)
         if isinstance(arg0, IntegerToken):
             min = arg0.Evaluate()
             if arg1 is None:
-                runtime.edge_hold_time -= min
+                handler.hold_timer.setInterval(handler.hold_timer.remainingTime() - min * 1000)
             elif isinstance(arg1, IntegerToken):
-                runtime.edge_hold_time -= random.randint(min, arg1.Evaluate())
+                handler.hold_timer.setInterval(
+                    handler.hold_timer.remainingTime() - random.randint(min, arg1.Evaluate()) * 1000
+                )
             else:
                 max = convert_string_time_to_seconds(arg1.Evaluate())
                 if max == "invalid units":
                     ValueErr(
                         f"Got invalid parameter {arg1.Evaluate()} for @RemoveEdgeHoldTime", *arg1.get_position()
                     ).throw()
-                runtime.edge_hold_time -= random.randint(min, max)
+                handler.hold_timer.setInterval(handler.hold_timer.remainingTime() - random.randint(min, max) * 1000)
         if isinstance(arg0, StringToken):
             min = convert_string_time_to_seconds(arg0.Evaluate())
-            if min == "inavalid units":
+            if min == "invalid units":
                 ValueErr(
                     f"Got invalid parameter {arg0.Evaluate()} for @RemoveEdgeHoldTime", *arg0.get_position()
                 ).throw()
             if arg1 is None:
-                runtime.edge_hold_time -= min
+                handler.hold_timer.setInterval(handler.hold_timer.remainingTime() - min * 1000)
             elif isinstance(arg1, IntegerToken):
-                runtime.edge_hold_time -= random.randint(min, arg1.Evaluate())
+                handler.hold_timer.setInterval(
+                    handler.hold_timer.remainingTime() - random.randint(min, arg1.Evaluate()) * 1000
+                )
             elif isinstance(arg1, StringToken):
                 max = convert_string_time_to_seconds(arg1.Evaluate())
                 if max == "invalid units":
                     ValueErr(f"Got invalid parameter {arg1.Evaluate()}", *arg0.get_position()).throw()
-                runtime.edge_hold_time -= random.randint(min, max)
-        if runtime.edge_hold_time <= 0:
-            runtime.edge_hold_time = 0
+                handler.hold_timer.setInterval(handler.hold_timer.remainingTime() - random.randint(min, max) * 1000)
+        if handler.hold_timer.remainingTime() <= 0:
             Bus.emit("stop_hold")
         # Done
 
     @validate_params
     @staticmethod
-    def RemoveStrokeTime(runtime, arg0, arg1):
+    def RemoveStrokeTime(arg0, arg1):
+        handler = getattr(get_runtime()._current_frame, "handler", None)
+        if not handler or not hasattr(handler, "remove_time"):
+            return
         if arg0 is None and arg1 is None:
-            min = runtime.settings.taunt_cycle_min
-            max = runtime.settings.taunt_cycle_max
-            runtime.stroke_time -= random.randint(min, max)
-        if isinstance(arg0, IntegerToken):
-            min = arg0.Evaluate()
+            min = get_settings().taunt_cycle_min
+            max = get_settings().taunt_cycle_max
+            handler.remove_time(random.randint(min, max) * 1000)
+        elif isinstance(arg0, IntegerToken):
+            min_val = arg0.Evaluate()
             if arg1 is None:
-                runtime.stroke_time -= min
+                handler.remove_time(min_val * 1000)
             elif isinstance(arg1, IntegerToken):
-                runtime.stroke_time -= random.randint(min, arg1.Evaluate())
+                handler.remove_time(random.randint(min_val, arg1.Evaluate()) * 1000)
             else:
-                max = convert_string_time_to_seconds(arg1.Evaluate())
-                if max == "invalid units":
-                    ValueErr(
-                        f"Got invalid parameter {arg1.Evaluate()} for @RemoveEdgeHoldTime", *arg1.get_position()
-                    ).throw()
-                runtime.stroke_time -= random.randint(min, max)
-        if isinstance(arg0, StringToken):
-            min = convert_string_time_to_seconds(arg0.Evaluate())
-            if min == "inavalid units":
-                ValueErr(
-                    f"Got invalid parameter {arg0.Evaluate()} for @RemoveEdgeHoldTime", *arg0.get_position()
-                ).throw()
+                max_val = convert_string_time_to_seconds(arg1.Evaluate())
+                handler.remove_time(random.randint(min_val, max_val) * 1000)
+        elif isinstance(arg0, StringToken):
+            min_val = convert_string_time_to_seconds(arg0.Evaluate())
             if arg1 is None:
-                runtime.stroke_time -= min
+                handler.remove_time(min_val * 1000)
             elif isinstance(arg1, IntegerToken):
-                runtime.stroke_time -= random.randint(min, arg1.Evaluate())
+                handler.remove_time(random.randint(min_val, arg1.Evaluate()) * 1000)
             elif isinstance(arg1, StringToken):
-                max = convert_string_time_to_seconds(arg1.Evaluate())
-                if max == "invalid units":
-                    ValueErr(f"Got invalid parameter {arg1.Evaluate()}", *arg0.get_position()).throw()
-                runtime.stroke_time -= random.randint(min, max)
-        if runtime.stroke_time <= 0:
-            runtime.stroke_time = 0
-            Bus.emit("stop_stroking")
+                max_val = convert_string_time_to_seconds(arg1.Evaluate())
+                handler.remove_time(random.randint(min_val, max_val) * 1000)
+
+        if hasattr(handler, "_cycle_timer") and handler._cycle_timer.remainingTime() <= 0:
+            handler.on_cycle_end()
         # Done
 
     @validate_params
     @staticmethod
-    def RemoveTeaseTime(runtime, arg0=None, arg1=None):
+    def RemoveTeaseTime(arg0=None, arg1=None):
+        runtime = get_runtime()
         if arg0 is None:
-            min = runtime.settings.min_tease_length
+            min = get_settings().min_tease_length
             runtime.tease_time -= random.randint(min, runtime.tease_time)
-        min = convert_string_time_to_seconds(arg0.Evaluate())
-        if min == "invalid units":
-            ValueErr("Got invalid parameter for @RemoveTeaseTime", *arg0.get_position()).throw()
-        if arg1 is None:
-            runtime.tease_time -= min
         else:
-            max = convert_string_time_to_seconds(arg1.Evaluate())
-            if max == "invalid units":
-                ValueErr("Got invalid parameter for @RemoveTeaseTime", *arg1.get_position()).throw()
-            runtime.tease_time -= random.randint(min, max)
+            min = convert_string_time_to_seconds(arg0.Evaluate())
+            if min == "invalid units":
+                ValueErr("Got invalid parameter for @RemoveTeaseTime", *arg0.get_position()).throw()
+            if arg1 is None:
+                runtime.tease_time -= min
+            else:
+                max = convert_string_time_to_seconds(arg1.Evaluate())
+                if max == "invalid units":
+                    ValueErr("Got invalid parameter for @RemoveTeaseTime", *arg1.get_position()).throw()
+                runtime.tease_time -= random.randint(min, max)
         if runtime.tease_time <= 0:
-            Bus.emit("end_tease")
-        # NFI: Probably need to call an end script here and exit gracefully rather than just call end_tease
+            Bus.emit("finish_tease")
+        # Done
 
     @validate_params
     @staticmethod
-    def ResponseNo(runtime, arg0):
+    def ResponseNo(arg0):
+        runtime = get_runtime()
         if os.path.isfile(arg0.Evaluate()):
             runtime._response_no = True
             runtime._response_script = arg0.Evaluate()
         else:
-            RuntimeErr(f"Script: {arg0.Evalute()} not found", *arg0.get_position()).throw()
+            RuntimeErr(f"Script: {arg0.Evaluate()} not found", *arg0.get_position()).throw()
         # Done
 
     @validate_params
     @staticmethod
-    def ResponseYes(runtime, arg0):
+    def ResponseYes(arg0):
+        runtime = get_runtime()
         if os.path.isfile(arg0.Evaluate()):
             runtime._response_yes = True
             runtime._response_script = arg0.Evaluate()
         else:
-            RuntimeErr(f"Script: {arg0.Evalute()} not found", *arg0.get_position()).throw()
+            RuntimeErr(f"Script: {arg0.Evaluate()} not found", *arg0.get_position()).throw()
         # Done
 
     @validate_params
     @staticmethod
-    def RestrictOrgasm(runtime, arg0, arg1):
-        runtime.orgasm_restricted = True
+    def RestrictOrgasm(arg0, arg1):
+        get_runtime().orgasm_restricted = True
         # Done
 
     @validate_params
     @staticmethod
-    def RuinYourOrgasm(runtime):
+    def RuinTaunt():
+        if get_runtime()._current_frame.context != "edging":
+            return False
+        return get_runtime()._current_frame.handler.ruin_taunts_enabled
+
+    @validate_params
+    @staticmethod
+    def RuinYourOrgasm():
         return Dispatch.vocab("#RuinYourOrgasm")
         # Done
 
     @validate_params
     @staticmethod
-    def RuinedMode(runtime, arg0, arg1):
+    def RuinedMode(arg0, arg1):
         mode = arg0.Evaluate().lower()
         if mode not in ["video", "goto"]:
             ValueErr(
                 "Invalid parameter: first argument to @RuinedMode must be one of 'video' or 'goto'",
                 *arg0.get_position(),
             )
-        runtime.mode = CustomMode(runtime, mode, arg1, "ruined")
+        CustomMode(mode, arg1, "ruined")
         # Done
 
     @validate_params
     @staticmethod
-    def RuinsOrgasm(runtime):
-        return runtime.settings.Domme.ruins_orgasms != 5
+    def RuinsOrgasm():
+        return get_settings().Domme.ruins_orgasms != 5
         # Done
 
     @validate_params
     @staticmethod
-    def SYS_MultipleEdgesStart(runtime):
+    def SYS_MultipleEdgesStart():
         return Dispatch.vocab("#SYS_MultipleEdgesStart")
         # Done
 
     @validate_params
     @staticmethod
-    def Sadistic(runtime):
-        return runtime.settings.Domme.sadistic
+    def Sadistic():
+        return get_settings().Domme.sadistic
         # Done
 
     @validate_params
     @staticmethod
-    def SelfOld(runtime):
-        return runtime.settings.Domme.age > 50
+    def SelfOld():
+        return get_settings().Domme.age > 50
         # Done
 
     @validate_params
     @staticmethod
-    def SelfYoung(runtime):
-        return runtime.settings.Domme.age < 30
+    def SelfYoung():
+        return get_settings().Domme.age < 30
         # Done
 
     @validate_params
     @staticmethod
-    def SendDailyTasks(runtime):
+    def SendDailyTasks():
         pass
 
     @validate_params
     @staticmethod
-    def Session(runtime, arg0):
-        return getattr(runtime, arg0.Evaluate())
+    def Session(arg0):
+        return getattr(get_runtime(), arg0.Evaluate())
         # Done
 
     @validate_params
     @staticmethod
-    def SessionCBTBalls(runtime):
-        return runtime.cbt_balls
+    def SessionCBTBalls():
+        return get_runtime().cbt_balls
         # Done
 
     @validate_params
     @staticmethod
-    def SessionEdges(runtime):
-        return runtime.edges
+    def SessionEdges():
+        return get_runtime().edges
         # Done
 
     @validate_params
     @staticmethod
-    def SetDate(runtime, arg0, arg1):
-        var_file = os.path.join(runtime.var_path, arg0.Evaluate)
+    def SetDate(arg0, arg1):
+        runtime = get_runtime()
+        var_file = os.path.join(runtime.var_path, arg0.Evaluate())
         if not is_valid_filename(var_file):
             ValueErr("Invalid filename specified for @SetDate", *arg0.get_position()).throw()
         delta = convert_string_time_to_seconds(arg1.Evaluate())
@@ -1805,82 +1893,89 @@ class Dispatch(metaclass=DispatchMeta):
 
     @validate_params
     @staticmethod
-    def SetDomme(runtime, arg0):
+    def SetDomme(arg0):
+        runtime = get_runtime()
         if arg0.Evaluate() == "D":
-            runtime.active_domme = runtime.settings.Domme.name
+            runtime.active_domme = get_settings().Domme.name
         elif arg0.Evaluate() >= 1 and arg0.Evaluate() <= 6:
-            runtime.active_domme = runtime.settings.contact_namespace(arg0.Evaluate(), "name")
+            runtime.active_domme = get_settings().contact_namespace(arg0.Evaluate(), "name")
         else:
             ValueErr("Got invalid parameter for @SetDomme", *arg0.get_position()).throw()
         # Done
 
     @validate_params
     @staticmethod
-    def SetFlag(runtime, arg0):
+    def SetFlag(arg0):
         flag = arg0.Evaluate()
         if not is_valid_filename(flag):
             ValueErr("Invalid filename specified for @SetFlag", *arg0.get_position()).throw()
-        with open(os.path.join(runtime.flag_path, flag), "w") as f:
-            f.write("")
-        # NFI Need to make sure the string is a valid Windows filename
+        flags = getattr(get_settings(), "Flags", {}).setdefault(get_settings().current_personality, [])
+        if flag not in flags:
+            flags.append(flag)
+            Bus.emit("save_settings")
+        # Done
 
     @validate_params
     @staticmethod
-    def SetImageBarImage(runtime, arg0, arg1):
-        pass
+    def SetImageBarImage(arg0, arg1=None):
+        num = int(arg0.Evaluate())
+        path = str(arg1.Evaluate()) if arg1 else ""
+        Bus.emit("set_image_bar_image", num, path)
 
     @validate_params
     @staticmethod
-    def SetLink(runtime, arg0, arg1=None):
-        # runtime._next_link expects a 2-tuple of the form (int: line_number OR string: headline, string: filename)
-        filepath = os.path.join(runtime.stroke_path, "Link", arg0.Evaluate())
+    def SetLink(arg0):
+        runtime = get_runtime()
+        filepath = os.path.join(
+            APPLICATION_ROOT, "Scripts", runtime.settings.current_personality, "Stroke", "Link", arg0.Evaluate()
+        )
         if os.path.isfile(filepath):
-            runtime._next_link = (0 if arg1 is None else arg1.Evaluate(), filepath)
+            runtime._next_link = filepath
             return
-        filepath = os.path.join(runtime.custom_path, "Link", arg0.Evaluate())
-        if os.path.isfile(filepath):
-            runtime._next_link = (0 if arg1 is None else arg1.Evaluate(), filepath)
-        # NFI ensure we check for these when choosing the next link file
+        # NFI I'd really like to find a cleaner way to implement this, ideally re-using as much of BookmarkLink as possible
 
     @validate_params
     @staticmethod
-    def SetModule(runtime, arg0, arg1=None):
-        # runtime._next_module expects a 2-tuple of the form (int: line_number OR string: headline, string: filename)
-        filepath = os.path.join(runtime.stroke_path, "Modules", arg0.Evaluate())
+    def SetModule(arg0, arg1=None):
+        runtime = get_runtime()
+        filepath = os.path.join(
+            APPLICATION_ROOT, "Scripts", runtime.settings.current_personality, "Modules", arg0.Evaluate()
+        )
         if os.path.isfile(filepath):
-            runtime._next_module = (0 if arg1 is None else arg1.Evaluate(), filepath)
+            runtime._next_module = filepath
             return
-        filepath = os.path.join(runtime.custom_path, "Modules", arg0.Evaluate())
-        if os.path.isfile(filepath):
-            runtime._next_module = (0 if arg1 is None else arg1.Evaluate(), filepath)
-        # NFI Ensure we check for these when choosing the next module to run
+        # NFI See comment on SetLink
 
     @validate_params
     @staticmethod
-    def SetMood(runtime, arg0):
-        runtime.domme_mood = arg0.Evaluate()
+    def SetMood(arg0):
+        get_runtime().domme_mood = arg0.Evaluate()
         # Done
 
     @validate_params
     @staticmethod
-    def Settings(runtime, arg0):
-        return getattr(runtime.settings, arg0.Evaluate())
+    def Settings(arg0):
+        return getattr(get_settings(), arg0.Evaluate())
         # Done
 
     @validate_params
     @staticmethod
-    def ShortName(runtime):
-        return runtime.settings.Domme.short_name
+    def ShortName():
+        return get_settings().Domme.short_name
         # Done
 
     @validate_params
     @staticmethod
-    def ShowBlogImage(runtime):
-        pass
+    def ShowBlogImage():
+        path = os.path.join(APPLICATION_ROOT, "url files")
+        file = URL_File.from_json(random.choice(os.listdir(path)))
+        file.load()
+        Bus.emit("next_slide")
+        # Done?
 
     @validate_params
     @staticmethod
-    def ShowDislikedImage(runtime):
+    def ShowDislikedImage():
         dir = os.path.join(APPLICATION_ROOT, "Disliked Images\\")
         files = []
         if os.path.isdir(dir):
@@ -1892,7 +1987,7 @@ class Dispatch(metaclass=DispatchMeta):
 
     @validate_params
     @staticmethod
-    def ShowImage(runtime, arg0):
+    def ShowImage(arg0):
         if is_image_file(arg0.Evaluate()):
             Bus.emit("show_image", arg0.Evaluate())
         else:
@@ -1901,7 +1996,7 @@ class Dispatch(metaclass=DispatchMeta):
 
     @validate_params
     @staticmethod
-    def ShowLikedImage(runtime):
+    def ShowLikedImage():
         dir = os.path.join(APPLICATION_ROOT, "Liked Images\\")
         files = []
         if os.path.isdir(dir):
@@ -1914,8 +2009,8 @@ class Dispatch(metaclass=DispatchMeta):
 
     @validate_params
     @staticmethod
-    def ShowNotTaggedImage(runtime):
-        dir = runtime._slides_dir
+    def ShowNotTaggedImage():
+        dir = get_runtime()._slides_dir
         files = [file for file in os.listdir(dir) if is_image_file(file)]
         if not os.path.isfile(os.path.join(dir, "ImageTags.txt")):
             Bus.emit("show_image", random.choice(files))
@@ -1935,8 +2030,8 @@ class Dispatch(metaclass=DispatchMeta):
 
     @validate_params
     @staticmethod
-    def ShowTaggedImage(runtime):
-        dir = runtime._slides_dir
+    def ShowTaggedImage():
+        dir = get_runtime()._slides_dir
         tag_imgs = []
         if os.path.isfile(os.path.join(dir, "ImageTags.txt")):
             with open(os.path.join(dir, "ImageTags.txt"), "r") as f:
@@ -1944,23 +2039,23 @@ class Dispatch(metaclass=DispatchMeta):
             for line in lines:
                 tags = line.split()
                 if len(tags) > 1:
-                    tag_imgs.append[tags[0]]
+                    tag_imgs.append(tags[0])
             Bus.emit("show_image", random.choice(tag_imgs))
         # Done
 
     @validate_params
     @staticmethod
-    def ShowWait(runtime):
-        pass
+    def ShowWait():
+        get_runtime()._show_wait = True
 
     @validate_params
     @staticmethod
-    def Slideshow(runtime, arg0, arg1=None, arg2=None):
+    def Slideshow(arg0, arg1=None, arg2=None):
         paths = []
-        if path1 := getattr(runtime.settings, f"{arg0.Evaluate().lower()}_images"):
+        if path1 := getattr(get_settings(), f"{arg0.Evaluate().lower()}_images"):
             paths.append(path1)
             if arg1 is not None:
-                if path2 := getattr(runtime.settings, f"{arg1.Evaluate().lower()}_images"):
+                if path2 := getattr(get_settings(), f"{arg1.Evaluate().lower()}_images"):
                     paths.append(path2)
                 elif arg1 and arg1.Evaluate().lower() in ("fast", "slow"):
                     pass
@@ -1978,176 +2073,208 @@ class Dispatch(metaclass=DispatchMeta):
 
     @validate_params
     @staticmethod
-    def SlideshowOff(runtime):
+    def SlideshowOff():
         Bus.emit("stop_slideshow")
         # Done
 
     @validate_params
     @staticmethod
-    def SlideshowOn(runtime):
+    def SlideshowOn():
         Bus.emit("start_slideshow")
         # Done
 
     @validate_params
     @staticmethod
-    def SlideshowPause(runtime):
+    def SlideshowPause():
         Bus.emit("pause_slideshow")
         # Done
 
     @validate_params
     @staticmethod
-    def SlowMotion(runtime, arg0):
+    def SlowMotion(arg0):
         Bus.emit("start_slowmo")
         # Done
 
     @validate_params
     @staticmethod
-    def SometimesAllowsOrgasm(runtime):
-        return runtime.settings.Domme.allows_orgasms == 3
+    def SometimesAllowsOrgasm():
+        return get_settings().Domme.allows_orgasms == 3
         # Done
 
     @validate_params
     @staticmethod
-    def SometimesRuinsOrgasm(runtime):
-        return runtime.settings.Domme.ruins_orgasms == 3
+    def SometimesRuinsOrgasm():
+        return get_settings().Domme.ruins_orgasms == 3
         # Done
 
     @validate_params
     @staticmethod
-    def StartStroking(runtime):
-        Bus.emit("start_stroking")
+    def StartStroking():
+        from execution_modes import StrokeTauntCycle, ChastityTauntCycle
+
+        runtime = get_runtime()
+        if runtime._state != "chatting":
+            return RuntimeErr("@StartStroking is only valid when state is 'chatting'", *runtime.get_position()).throw()
+        if get_settings().Sub.has_chastity and runtime.in_chastity:
+            ChastityTauntCycle()
+        else:
+            StrokeTauntCycle()
         # Done
 
     @validate_params
     @staticmethod
-    def StartStrokingKeyword(runtime):
+    def StartStrokingKeyword():
         return Dispatch.vocab("#StartStroking")
         # Done
 
     @validate_params
     @staticmethod
-    def StopStroking(runtime):
-        Bus.emit("stop_stroking")
+    def StopStroking():
+        runtime = get_runtime()
+        runtime._worship_mode = False
+        if runtime._state in ("stroking", "chastity_stroking"):
+            handler = runtime._current_frame.handler
+            if handler is not None:
+                handler.on_cycle_end()
         # Done
 
     @validate_params
     @staticmethod
-    def StopStrokingKeyword(runtime):
+    def StopStrokingKeyword():
         return Dispatch.vocab("#StopStroking")
         # Done
 
     @validate_params
     @staticmethod
-    def StopStrokingEdge(runtime):
+    def StopStrokingEdge():
+        get_runtime()._worship_mode = False
         return Dispatch.vocab("#StopStrokingEdge")
-        # Done
+        # NFI - Add this vocab file
 
     @validate_params
     @staticmethod
-    def StopTnA(runtime):
-        pass
+    def StopTnA():
+        response_dict = {}
+        Bus.emit("get_current_slide_path", response_dict)
+        if os.path.dirname(response_dict["path"]) == get_settings().boobs_images:
+            get_runtime()._tna_result = "boobs"
+        elif os.path.dirname(response_dict["path"]) == get_settings().butts_images:
+            get_runtime()._tna_result = "butts"
+        Bus.emit("stop_slideshow")
+        # Done?
 
     @validate_params
     @staticmethod
-    def StopVideo(runtime):
+    def StopVideo():
         Bus.emit("stop_video")
         # Done
 
     @validate_params
     @staticmethod
-    def StrokeCycleTime(runtime):
-        return runtime.stroke_time
-        # Done
+    def StrokeCycleTime():
+        handler = getattr(get_runtime()._current_frame, "handler", None)
+        if handler and hasattr(handler, "get_time"):
+            return handler.get_time()
+        return 0
 
     @validate_params
     @staticmethod
-    def StrokeFaster(runtime):
+    def StrokeFaster():
+        runtime = get_runtime()
+        if getattr(runtime, "_worship_mode", False):
+            runtime._abort_line = True
+            return
         Bus.emit("stroke_faster")
         # done
 
     @validate_params
     @staticmethod
-    def StrokeFastest(runtime):
+    def StrokeFastest():
+        runtime = get_runtime()
+        if getattr(runtime, "_worship_mode", False):
+            runtime._abort_line = True
+            return
         Bus.emit("stroke_fastest")
         # Done
 
     @validate_params
     @staticmethod
-    def StrokeSlower(runtime):
+    def StrokeSlower():
         Bus.emit("stroke_slower")
         # Done
 
     @validate_params
     @staticmethod
-    def StrokeSlowest(runtime):
+    def StrokeSlowest():
         Bus.emit("stroke_slowest")
         # Done
 
     @validate_params
     @staticmethod
-    def Stroking(runtime):
-        return runtime._taunt_context == "stroke"
+    def Stroking():
+        return get_runtime()._state in ("stroking", "chastity_stroking")
         # Done
 
     @validate_params
     @staticmethod
-    def SubNameReset(runtime):
-        runtime.subname_temp = None
+    def SubNameReset():
+        get_runtime()._subname_temp = None
         # Done
 
     @validate_params
     @staticmethod
-    def SubNameTemp(runtime, arg0):
-        runtime.subname_temp = arg0.Evaluate()
+    def SubNameTemp(arg0):
+        get_runtime()._subname_temp = arg0.Evaluate()
         # Done
 
     @validate_params
     @staticmethod
-    def SubName(runtime):
+    def SubName():
+        runtime = get_runtime()
         if runtime.subname_temp is not None:
             return runtime.subname_temp
-        return runtime.settings.Sub.name
+        return get_settings().Sub.name
         # Done
 
     @validate_params
     @staticmethod
-    def SubOld(runtime):
-        return runtime.settings.Sub.Age > 50
+    def SubOld():
+        return get_settings().Sub.age > 50
         # Done
 
     @validate_params
     @staticmethod
-    def SubWritingTaskMax(runtime):
-        return runtime.settings.writing_task_lines_max
+    def SubWritingTaskMax():
+        return get_settings().writing_task_lines_max
         # Done
 
     @validate_params
     @staticmethod
-    def SubWritingTaskMin(runtime):
-        return runtime.settings.writing_task_lines_min
+    def SubWritingTaskMin():
+        return get_settings().writing_task_lines_min
         # Done
 
     @validate_params
     @staticmethod
-    def SubYoung(runtime):
-        return runtime.settings.Sub.Age < 30
+    def SubYoung():
+        return get_settings().Sub.age < 30
         # Done
 
     @validate_params
     @staticmethod
-    def Supremacist(runtime):
-        return runtime.settings.Domme.supremacist
+    def Supremacist():
+        return get_settings().Domme.supremacist
         # Done
 
     @validate_params
     @staticmethod
-    def SystemMessage(runtime):
-        runtime.system_message = True
+    def SystemMessage():
+        get_runtime()._system_message = True
         # Done
 
     @validate_params
     @staticmethod
-    def Tag(runtime, *args):
+    def Tag(*args):
         tags = []
         Bus.emit("img_tags_requested", tags)
         args = list(arg.Evaluate() for arg in args)
@@ -2159,7 +2286,7 @@ class Dispatch(metaclass=DispatchMeta):
 
     @validate_params
     @staticmethod
-    def TagAny(runtime, *args):
+    def TagAny(*args):
         tags = []
         Bus.emit("img_tags_requested", tags)
         args = list(arg.Evaluate() for arg in args)
@@ -2171,7 +2298,7 @@ class Dispatch(metaclass=DispatchMeta):
 
     @validate_params
     @staticmethod
-    def TagGarment(runtime):
+    def TagGarment():
         tags = []
         Bus.emit("img_tags_requested", tags)
         for tag in tags:
@@ -2181,19 +2308,18 @@ class Dispatch(metaclass=DispatchMeta):
 
     @validate_params
     @staticmethod
-    def TempFlag(runtime, arg0):
-        runtime._temp_flags.add(arg0.Evaluate())
+    def TempFlag(arg0):
+        get_runtime()._temp_flags.add(arg0.Evaluate())
         # Done
 
     @validate_params
     @staticmethod
-    def Timeout(runtime, arg0, arg1):
-        timeout = arg0.Evaluate()
-        timer = Clock.schedule_once(lambda dt: Dispatch.Goto(arg1.Evaluate()), timeout)
+    def Timeout(arg0, arg1):
+        timer = QTimer.singleShot(arg0.Evaluate() * 1000, lambda: get_runtime().goto(arg1.Evaluate()))
 
-        def cancel_timer(runtime, message):
+        def cancel_timer(message):
             if isinstance(message, UserMessage):
-                timer.cancel()
+                timer.stop()
                 Bus.unsub("new_message", cancel_timer)
 
         Bus.sub("new_message", cancel_timer)
@@ -2201,148 +2327,142 @@ class Dispatch(metaclass=DispatchMeta):
 
     @validate_params
     @staticmethod
-    def TnAFastSlides(runtime):
-        pass
+    def TnAFastSlides():
+        folders = [folder for folder in (get_settings().boobs_images, get_settings().butts_images) if os.isdir(folder)]
+        Bus.emit("new_slideshow", folders)
+        Bus.emit("next_slide")
 
     @validate_params
     @staticmethod
-    def TnAFastSlidesResult(runtime):
-        return runtime.tna_fast_slides_result
+    def TnAFastSlidesResult():
+        return get_runtime().tna_result
         # Done
 
     @validate_params
     @staticmethod
-    def TnASlowSlides(runtime):
-        pass
-
-    @validate_params
-    @staticmethod
-    def UnlockMedia(runtime):
-        runtime.media_locked = False
+    def UnlockMedia():
+        get_runtime()._media_locked = False
         # Done
 
     @validate_params
     @staticmethod
-    def UpdateOrgasm(runtime):
-        runtime.settings.Sub.last_orgasm_date = string_from_date(datetime.now())
-        # Done
-
-    @validate_params
-    @staticmethod
-    def UpdateRuined(runtime):
-        runtime.settings.Sub.last_ruin_date = string_from_date(datetime.now())
-        # Done
-
-    @validate_params
-    @staticmethod
-    def ValentinesDay(runtime):
+    def ValentinesDay():
         return datetime.now().month == 2 and datetime.now().day == 14
         # Done
 
-    # TODO: It may not be right for this to show up in Dispatch, because these should
-    #       be getting turned into VarRef nodes by the tokenizer, whose visit method
-    #       doesn't point to Dispatch, but we obviously still want the keyword to be
-    #       documented so this requires some thought.
     @validate_params
     @staticmethod
-    def Var(runtime, arg0):
-        if not is_valid_filename(arg0.Evaluate()):
-            ValueErr("Invalid filename specified for #Var", *arg0.get_position()).throw()
-        runtime.var_file = arg0.Evaluate()
-
-    @validate_params
-    @staticmethod
-    def VarExists(runtime, arg0):
-        return os.path.isfile(os.path.join(runtime.var_path, arg0.Evaluate()))
+    def Var(arg0):
+        pass  # NOTE: This method never gets called, because visiting a VarRef calls Evaluate()
         # Done
 
     @validate_params
     @staticmethod
-    def VideoIsPaused(runtime):
+    def VarExists(arg0):
+        var_name = arg0.Evaluate()
+        vars_dict = getattr(get_settings(), "Variables", {}).setdefault(get_settings().current_personality, {})
+        return var_name in vars_dict
+        # Done
+
+    @validate_params
+    @staticmethod
+    def VideoIsPaused():
         Bus.emit("get_video_info", info := {})
         return info["state"] == "pause"
         # Done
 
     @validate_params
     @staticmethod
-    def VideoIsPlaying(runtime):
+    def VideoIsPlaying():
         Bus.emit("get_video_info", info := {})
         return info["state"] == "play"
         # Done
 
     @validate_params
     @staticmethod
-    def VideoIsSlowMotion(runtime):
+    def VideoIsSlowMotion():
         Bus.emit("get_slowmo_state", info := {"slowmo": None})
         return info["slowmo"]
         # Done
 
     @validate_params
     @staticmethod
-    def VideoLength(runtime):
+    def VideoLength():
         Bus.emit("get_video_info", info := {})
         return info["duration"]
         # Done
 
     @validate_params
     @staticmethod
-    def VideoRemaining(runtime):
+    def VideoRemaining():
         Bus.emit("get_video_info", info := {})
         return info["duration"] - info["position"]
         # Done
 
     @validate_params
     @staticmethod
-    def Vulgar(runtime):
-        return runtime.settings.Domme.vulgar
+    def Vulgar():
+        return get_settings().Domme.vulgar
         # Done
 
     @validate_params
     @staticmethod
-    def Wait(runtime, arg0):
-        Clock.schedule_once(Bus.emit("interpreter_ready"), arg0.Evaluate())
+    def Wait(arg0):
+        duration = arg0.Evaluate()
+        if get_runtime()._show_wait:
+            Bus.emit("show_wait_ui", duration)
+            get_runtime()._show_wait = False
+        QTimer.singleShot(duration * 1000, lambda: Bus.emit("interpreter_ready"))
         # Done
 
     @validate_params
     @staticmethod
-    def WaitAudio(runtime):
-        Bus.emit("wait_audio", info={"remaining": None})
-        Clock.schedule_once(Bus.emit("interpreter_ready"), info["remaining"])
+    def WaitAudio():
+        info = {"remaining": None}
+        Bus.emit("wait_audio", info)
+        if info["remaining"] is not None:
+            QTimer.singleShot(info["remaining"] * 1000, lambda: Bus.emit("interpreter_ready"))
         # Done
 
     @validate_params
     @staticmethod
-    def WhoIsTyping(runtime, arg0):
-        return runtime.settings.id_to_name(arg0.Evaluate()) == runtime.active_domme.name
+    def WhoIsTyping(arg0):
+        return get_settings().id_to_name(arg0.Evaluate()) == get_runtime().active_domme.name
         # Done
 
     @validate_params
     @staticmethod
-    def Worship(runtime, arg0):
-        if arg0.Evaluate().lower() in ["ass", "boobs", "feet", "none", "pussy"]:
-            if arg0.Evaluate().lower() == "none":
-                runtime.worship_mode_target = None
-            else:
-                runtime.worship_mode_target = arg0.Evaluate()
+    def Worship(arg0):
+        if arg0.Evaluate().lower() in ["ass", "boobs", "feet", "pussy"]:
+            get_runtime()._worship_mode_target = arg0.Evaluate().lower()
+        else:
+            RuntimeErr("Invalid target specified for Worship Mode", *arg0.get_position()).throw()
+
+        get_runtime()._worship_mode = True
+        Bus.emit("stroke_slowest")
         # Done
 
     @validate_params
     @staticmethod
-    def WorshipOff(runtime):
-        pass
+    def WorshipOff():
+        get_runtime()._worship_mode = False
+        # Done
 
     @validate_params
     @staticmethod
-    def WorshipOn(runtime):
-        pass
+    def WorshipOn():
+        get_runtime()._worship_mode_target = None
+        get_runtime()._worship_mode = True
+        Bus.emit("stroke_slowest")
+        # Done
 
     @validate_params
     @staticmethod
-    def YesMode(runtime, arg0, arg1):
+    def YesMode(arg0, arg1):
         mode = arg0.Evaluate().lower()
         if mode not in ["video", "goto"]:
             ValueErr(
                 "Invalid parameter: first argument to @YesMode must be one of 'video' or 'goto'", *arg0.get_position()
             )
-        runtime.mode = CustomMode(runtime, mode, arg1, "yes")
+        CustomMode(mode, arg1, "yes")
         # Done
